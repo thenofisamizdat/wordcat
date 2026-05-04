@@ -12,7 +12,14 @@ from ..auth import Identity, decode_token
 from ..db import SessionLocal
 from ..game import engine
 from ..game.words import categories_by_id, load_letter_values
-from ..models import Game, GamePlayer, GameState, User
+from ..models import Game, GamePlayer, GameState, RatingHistory, User
+from ..services.rating import (
+    apply_game_result,
+    display_from,
+    is_provisional,
+    ranks_from_scores,
+    rating_payload,
+)
 
 router = APIRouter()
 
@@ -23,7 +30,7 @@ def _label(game: Game, seat: int) -> str:
     return names.get(str(seat), f"Player {seat + 1}")
 
 
-def _public_state(game: Game) -> dict:
+def _public_state(game: Game, db: Optional[Session] = None) -> dict:
     if game.state is not None:
         state = json.loads(game.state.state_json)
         pv = engine.public_view(state)
@@ -49,12 +56,30 @@ def _public_state(game: Game) -> dict:
             "difficulty_multipliers": {"easy": 1.0, "medium": 1.5, "hard": 2.0},
         }
     pv["status"] = game.status
+    settings_dict = json.loads(game.settings_json or "{}")
+    pv["min_players"] = int(settings_dict.get("min_players", 2))
+    pv["max_players"] = int(settings_dict.get("max_players", len(game.players) or 2))
+
+    # Fetch rated users in one query so we can attach a rating dict per seat.
+    users_by_id: dict = {}
+    if db is not None:
+        user_ids = [p.user_id for p in game.players if p.user_id is not None]
+        if user_ids:
+            users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()}
+
+    def _seat_rating(p):
+        if p.user_id is None or p.user_id not in users_by_id:
+            return None
+        u = users_by_id[p.user_id]
+        return rating_payload(u.rating_mu, u.rating_sigma, u.games_played)
+
     pv["players"] = [
         {
             "seat": p.seat,
             "name": _label(game, p.seat),
             "is_guest": p.user_id is None,
             "score": p.score,
+            "rating": _seat_rating(p),
         }
         for p in sorted(game.players, key=lambda x: x.seat)
     ]
@@ -102,6 +127,10 @@ class Room:
         self.connections: dict[int, set[WebSocket]] = {}  # seat -> sockets
         self.lock = asyncio.Lock()
         self.timer_task: Optional[asyncio.Task] = None
+        # Auto-start countdown task. Set when len(players) >= min_players in
+        # the lobby phase. Cancelled if a player leaves below threshold or if
+        # the host manually starts (which fires immediately).
+        self.countdown_task: Optional[asyncio.Task] = None
 
     def add(self, seat: int, ws: WebSocket) -> None:
         self.connections.setdefault(seat, set()).add(ws)
@@ -152,7 +181,12 @@ manager = Manager()
 
 # ---------- helpers ----------
 
-def _persist(db: Session, game: Game, state: dict) -> None:
+def _persist(db: Session, game: Game, state: dict) -> Optional[list]:
+    """Persist engine state + scores to DB. If the game just transitioned to
+    'finished' AND every seat is held by a registered user, compute rating
+    updates, write them to the User rows + RatingHistory, and return a
+    `rating_changes` payload for broadcasting. Otherwise returns None.
+    """
     if game.state is None:
         game.state = GameState(game_id=game.id, state_json=json.dumps(state))
     else:
@@ -163,15 +197,94 @@ def _persist(db: Session, game: Game, state: dict) -> None:
             p.score = state["scores"][p.seat]
         except (IndexError, KeyError):
             pass
-    if state.get("finished") and game.status != "finished":
+
+    rating_changes: Optional[list] = None
+    just_finished = state.get("finished") and game.status != "finished"
+    if just_finished:
         game.status = "finished"
         game.finished_at = datetime.now(timezone.utc)
+        rating_changes = _apply_ratings_on_finish(db, game, state)
+
     db.add(game)
     db.commit()
+    return rating_changes
+
+
+def _apply_ratings_on_finish(db: Session, game: Game, state: dict) -> Optional[list]:
+    """Update OpenSkill ratings for every player in the freshly-finished game.
+
+    Skips entirely if any seat is a guest (`user_id is None`) — guest games
+    don't move anyone's rating because guest accounts are throwaway.
+
+    Returns a list of per-seat rating-change dicts suitable for broadcasting:
+        [{seat, user_id, name, display_before, display_after, delta,
+          provisional_before, provisional_after}, ...]
+    """
+    seats = sorted(game.players, key=lambda p: p.seat)
+    if not seats or any(p.user_id is None for p in seats):
+        return None
+    if len(seats) < 2:
+        return None
+
+    scores = state.get("scores") or []
+    if len(scores) < len(seats):
+        return None
+
+    user_ids = [p.user_id for p in seats]
+    users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()}
+    if any(uid not in users_by_id for uid in user_ids):
+        return None
+
+    in_ratings = [(users_by_id[p.user_id].rating_mu, users_by_id[p.user_id].rating_sigma)
+                  for p in seats]
+    seat_scores = [scores[p.seat] for p in seats]
+    ranks = ranks_from_scores(seat_scores)
+    new_ratings = apply_game_result(in_ratings, ranks)
+
+    now = datetime.now(timezone.utc)
+    changes: list = []
+    for p, (mu_b, sg_b), (mu_a, sg_a) in zip(seats, in_ratings, new_ratings):
+        u = users_by_id[p.user_id]
+        gp_before = u.games_played
+        gp_after = gp_before + 1
+        disp_b = display_from(mu_b, sg_b)
+        disp_a = display_from(mu_a, sg_a)
+        prov_b = is_provisional(gp_before, sg_b)
+        prov_a = is_provisional(gp_after, sg_a)
+
+        # Persist new rating to User.
+        u.rating_mu = mu_a
+        u.rating_sigma = sg_a
+        u.games_played = gp_after
+        u.rating_updated_at = now
+        db.add(u)
+
+        # Audit row.
+        db.add(RatingHistory(
+            user_id=u.id,
+            game_id=game.id,
+            finishing_rank=ranks[seats.index(p)],
+            finishing_score=seat_scores[seats.index(p)],
+            mu_before=mu_b, sigma_before=sg_b,
+            mu_after=mu_a,  sigma_after=sg_a,
+            display_before=disp_b, display_after=disp_a,
+        ))
+
+        changes.append({
+            "seat": p.seat,
+            "user_id": u.id,
+            "name": _label(game, p.seat),
+            "display_before": disp_b,
+            "display_after": disp_a,
+            "delta": disp_a - disp_b,
+            "provisional_before": prov_b,
+            "provisional_after": prov_a,
+        })
+    return changes
 
 
 async def _send_state(room: Room, db: Session, game: Game, *, event: Optional[dict] = None) -> None:
-    pv = _public_state(game)
+    pv = _public_state(game, db)
     pv["connected_seats"] = sorted(room.connected_seats())
     msg = {"type": "state", "state": pv, "letter_values": load_letter_values()}
     if event:
@@ -209,12 +322,92 @@ async def _schedule_turn_timer(room: Room, code: str) -> None:
                     # Fire skip
                     fired = engine.force_skip_if_expired(state)
                     if fired:
-                        _persist(db, game, state)
-                        await _send_state(room, db, game, event={"type": "turn_timeout"})
+                        rating_changes = _persist(db, game, state)
+                        ev = {"type": "turn_timeout"}
+                        if rating_changes is not None:
+                            ev["type"] = "game_finished"
+                            ev["rating_changes"] = rating_changes
+                        await _send_state(room, db, game, event=ev)
         except asyncio.CancelledError:
             return
 
     room.timer_task = asyncio.create_task(_tick())
+
+
+# ---------- start helpers ----------
+
+async def _start_game_now(room: Room, db: Session, game: Game, *, started_by: str = "host") -> None:
+    """Transition the game from lobby → active, persist, broadcast, and arm
+    the per-turn timer. Cancels any pending countdown task."""
+    import secrets as _sec
+    if room.countdown_task and not room.countdown_task.done():
+        room.countdown_task.cancel()
+        room.countdown_task = None
+
+    settings_dict = json.loads(game.settings_json or "{}")
+    seed = int.from_bytes(_sec.token_bytes(6), "big")
+    state = engine.new_state(
+        seed=seed,
+        num_players=len(game.players),
+        turn_seconds=int(settings_dict.get("turn_seconds", 180)),
+    )
+    game.status = "active"
+    game.started_at = datetime.now(timezone.utc)
+    _persist(db, game, state)
+    await _send_state(room, db, game, event={"type": "game_started", "started_by": started_by})
+    await _schedule_turn_timer(room, room.code)
+
+
+def _min_players_for(game: Game) -> int:
+    s = json.loads(game.settings_json or "{}")
+    return int(s.get("min_players", 2))
+
+
+async def _maybe_schedule_countdown(room: Room, code: str, *, seconds: int = 10) -> None:
+    """If the lobby has reached its min_players threshold and no countdown is
+    already running, start one. The countdown re-checks conditions before
+    firing — if a player has left in the meantime it self-cancels."""
+    with SessionLocal() as db:
+        game = db.query(Game).filter(Game.code == code).first()
+        if not game or game.status != "lobby":
+            return
+        if len(game.players) < _min_players_for(game):
+            return
+    # Already counting down — leave it alone.
+    if room.countdown_task and not room.countdown_task.done():
+        return
+
+    async def _tick():
+        try:
+            # Announce.
+            await manager.broadcast(room, {"type": "countdown_started", "seconds": seconds})
+            await asyncio.sleep(seconds)
+            with SessionLocal() as db2:
+                game2 = db2.query(Game).filter(Game.code == code).first()
+                if not game2 or game2.status != "lobby":
+                    return
+                if len(game2.players) < _min_players_for(game2):
+                    await manager.broadcast(room, {"type": "countdown_cancelled"})
+                    return
+                await _start_game_now(room, db2, game2, started_by="countdown")
+        except asyncio.CancelledError:
+            return
+
+    room.countdown_task = asyncio.create_task(_tick())
+
+
+async def _cancel_countdown_if_below_min(room: Room, code: str) -> None:
+    """Called after a player leaves; if we've dropped below min_players,
+    cancel any in-flight countdown and tell clients."""
+    with SessionLocal() as db:
+        game = db.query(Game).filter(Game.code == code).first()
+        if not game or game.status != "lobby":
+            return
+        below = len(game.players) < _min_players_for(game)
+    if below and room.countdown_task and not room.countdown_task.done():
+        room.countdown_task.cancel()
+        room.countdown_task = None
+        await manager.broadcast(room, {"type": "countdown_cancelled"})
 
 
 # ---------- endpoint ----------
@@ -253,6 +446,9 @@ async def ws_game(
 
         if game.status == "active":
             await _schedule_turn_timer(room, code)
+        elif game.status == "lobby":
+            # If we've now reached min_players, kick off the auto-start countdown.
+            await _maybe_schedule_countdown(room, code)
 
         try:
             while True:
@@ -278,22 +474,14 @@ async def ws_game(
                     if game.host_user_id is not None and (not identity.user or identity.user.id != game.host_user_id):
                         await websocket.send_json({"type": "error", "code": "not_host"})
                         continue
-                    if len(game.players) < 2:
-                        await websocket.send_json({"type": "error", "code": "need_two_players"})
+                    min_p = _min_players_for(game)
+                    if len(game.players) < min_p:
+                        await websocket.send_json({
+                            "type": "error", "code": "need_min_players",
+                            "min_players": min_p, "have": len(game.players),
+                        })
                         continue
-                    import secrets as _sec
-                    settings_dict = json.loads(game.settings_json or "{}")
-                    seed = int.from_bytes(_sec.token_bytes(6), "big")
-                    state = engine.new_state(
-                        seed=seed,
-                        num_players=len(game.players),
-                        turn_seconds=int(settings_dict.get("turn_seconds", 180)),
-                    )
-                    game.status = "active"
-                    game.started_at = datetime.now(timezone.utc)
-                    _persist(db, game, state)
-                    await _send_state(room, db, game, event={"type": "game_started"})
-                    await _schedule_turn_timer(room, code)
+                    await _start_game_now(room, db, game, started_by="host")
                     continue
 
                 if game.status != "active" or not game.state:
@@ -309,8 +497,11 @@ async def ws_game(
                     res = engine.pick_difficulty(state, seat=player.seat, tier=tier)
                     if not res["ok"]:
                         await websocket.send_json({"type": "action_rejected", "action": "pick", "reason": res["reason"]})
-                    _persist(db, game, state)
-                    await _send_state(room, db, game, event={"type": "card_drawn" if res["ok"] else "noop"})
+                    rc = _persist(db, game, state)
+                    ev = {"type": "card_drawn" if res["ok"] else "noop"}
+                    if rc is not None:
+                        ev = {"type": "game_finished", "rating_changes": rc}
+                    await _send_state(room, db, game, event=ev)
                     if res["ok"]:
                         await _schedule_turn_timer(room, code)
                     continue
@@ -318,23 +509,31 @@ async def ws_game(
                 if action == "submit":
                     word = msg.get("word", "")
                     res = engine.submit_word(state, seat=player.seat, word=word)
-                    _persist(db, game, state)
+                    rc = _persist(db, game, state)
                     if res["ok"]:
-                        await _send_state(room, db, game, event={
-                            "type": "word_accepted", "seat": player.seat,
-                            "word": res["word"], "points": res["points"],
-                        })
+                        ev = {"type": "word_accepted", "seat": player.seat,
+                              "word": res["word"], "points": res["points"]}
+                        if rc is not None:
+                            ev = {"type": "game_finished", "rating_changes": rc,
+                                  "last_word": {"seat": player.seat, "word": res["word"], "points": res["points"]}}
+                        await _send_state(room, db, game, event=ev)
                     else:
                         await websocket.send_json({"type": "action_rejected", "action": "submit", "reason": res["reason"]})
                         # Still broadcast state in case timeout cleared the card.
-                        await _send_state(room, db, game)
+                        if rc is not None:
+                            await _send_state(room, db, game, event={"type": "game_finished", "rating_changes": rc})
+                        else:
+                            await _send_state(room, db, game)
                     continue
 
                 if action == "skip":
                     res = engine.skip(state, seat=player.seat, reason="voluntary")
-                    _persist(db, game, state)
+                    rc = _persist(db, game, state)
                     if res["ok"]:
-                        await _send_state(room, db, game, event={"type": "skipped", "seat": player.seat})
+                        ev = {"type": "skipped", "seat": player.seat}
+                        if rc is not None:
+                            ev = {"type": "game_finished", "rating_changes": rc}
+                        await _send_state(room, db, game, event=ev)
                     else:
                         await websocket.send_json({"type": "action_rejected", "action": "skip", "reason": res["reason"]})
                     continue

@@ -47,9 +47,13 @@ export default function Home() {
       )}
 
       {isAuthed && (
-        <div className="text-center">
-          <Link to="/leaderboard" className="text-stone-500 hover:text-stone-800 text-sm underline">
-            View today's daily leaderboard →
+        <div className="text-center text-sm space-x-3">
+          <Link to="/leaderboard" className="text-stone-500 hover:text-stone-800 underline">
+            Daily leaderboard
+          </Link>
+          <span className="text-stone-300">·</span>
+          <Link to="/multiplayer-leaderboard" className="text-stone-500 hover:text-stone-800 underline">
+            Top multiplayer players
           </Link>
         </div>
       )}

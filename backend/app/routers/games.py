@@ -12,8 +12,10 @@ from ..auth import Identity, get_identity
 from ..db import get_db
 from ..game import engine
 from ..game.words import categories_by_id, load_letter_values
-from ..models import Game, GamePlayer, GameState
+from ..models import Game, GamePlayer, GameState, User
 from ..schemas import (
+    AutoJoinRequest,
+    AutoJoinResponse,
     CategoryOut,
     CreateGameRequest,
     GameDetail,
@@ -21,7 +23,14 @@ from ..schemas import (
     GamePlayerOut,
     GameSummary,
     JoinGameResponse,
+    RatingOut,
 )
+from ..services.matchmaking import (
+    LobbySummary as MMLobby,
+    PlayerRating as MMPlayer,
+    auto_join_pick,
+)
+from ..services.rating import rating_payload
 
 router = APIRouter(prefix="/api/games", tags=["games"])
 
@@ -71,18 +80,27 @@ def _settings(game: Game) -> dict:
         return {}
 
 
-def _summary(game: Game, db: Session, *, connected_seats: set[int] | None = None) -> GameSummary:
+def _users_for_game(db: Session, game: Game) -> dict[int, User]:
+    user_ids = [p.user_id for p in game.players if p.user_id is not None]
+    if not user_ids:
+        return {}
+    rows = db.query(User).filter(User.id.in_(user_ids)).all()
+    return {u.id: u for u in rows}
+
+
+def _summary(game: Game, db: Session | None, *, connected_seats: set[int] | None = None) -> GameSummary:
     s = _settings(game)
     host = next((p for p in game.players if p.user_id == game.host_user_id), None) if game.host_user_id else None
-    host_name = host.guest_name if host and host.user_id is None else (host and host.guest_name)  # placeholder
-    # We store guest_name as the stable_key for guests; display name is in label_for_player below.
+    users_by_id = _users_for_game(db, game) if db is not None else {}
     return GameSummary(
         code=game.code,
         status=game.status,
         host_name=_label_for_player(game, host) if host else "—",
+        min_players=int(s.get("min_players", 2)),
         max_players=int(s.get("max_players", 4)),
         turn_seconds=int(s.get("turn_seconds", 180)),
-        players=[_player_out(p, connected_seats) for p in sorted(game.players, key=lambda x: x.seat)],
+        players=[_player_out(p, connected_seats, users_by_id)
+                 for p in sorted(game.players, key=lambda x: x.seat)],
         created_at=(game.created_at or datetime.now(timezone.utc)).isoformat(),
     )
 
@@ -107,14 +125,23 @@ def _label_for_player(game: Game, player: GamePlayer | None) -> str:
     return names.get(str(player.seat), "Guest")
 
 
-def _player_out(p: GamePlayer, connected_seats: set[int] | None) -> GamePlayerOut:
+def _player_out(
+    p: GamePlayer,
+    connected_seats: set[int] | None,
+    users_by_id: dict[int, User] | None = None,
+) -> GamePlayerOut:
     g = p.game
+    rating: RatingOut | None = None
+    if p.user_id is not None and users_by_id is not None and p.user_id in users_by_id:
+        u = users_by_id[p.user_id]
+        rating = RatingOut(**rating_payload(u.rating_mu, u.rating_sigma, u.games_played))
     return GamePlayerOut(
         seat=p.seat,
         name=_label_for_player(g, p),
         is_guest=(p.user_id is None),
         score=p.score,
         connected=(connected_seats is not None and p.seat in connected_seats),
+        rating=rating,
     )
 
 
@@ -134,12 +161,18 @@ def create_game(
     db: Session = Depends(get_db),
     identity: Identity = Depends(get_identity),
 ):
+    if req.min_players > req.max_players:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="min_players cannot exceed max_players",
+        )
     code = _generate_code(db)
     game = Game(
         code=code,
         host_user_id=identity.user.id if identity.user else None,
         status="lobby",
         settings_json=json.dumps({
+            "min_players": req.min_players,
             "max_players": req.max_players,
             "turn_seconds": req.turn_seconds,
             "names": {},
@@ -162,7 +195,7 @@ def create_game(
     db.add(game)
     db.commit()
     db.refresh(game)
-    return _detail(game, identity)
+    return _detail(game, identity, db)
 
 
 @router.get("", response_model=GameListOut)
@@ -216,6 +249,130 @@ def join_game(
     return JoinGameResponse(code=game.code, seat=seat)
 
 
+@router.post("/auto-join", response_model=AutoJoinResponse)
+def auto_join(
+    req: AutoJoinRequest,
+    db: Session = Depends(get_db),
+    identity: Identity = Depends(get_identity),
+):
+    """Pick the best-fit open lobby for this player or create a new one.
+
+    Registered users only — guests get 401. Matching uses
+    `services.matchmaking.auto_join_pick` which scores candidate lobbies on
+    rating closeness × lobby age × capacity (closer to starting first).
+    """
+    if identity.user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sign up to use auto-join (guests can still join games by code).",
+        )
+    if req.min_players > req.max_players:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="min_players cannot exceed max_players",
+        )
+
+    # Pull all lobby-status games we could potentially join (excluding ones
+    # this user already sits in).
+    open_games = (
+        db.query(Game)
+        .filter(Game.status == "lobby")
+        .order_by(Game.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    candidates: list[MMLobby] = []
+    user_already_in: dict[str, int] = {}
+    for g in open_games:
+        s = _settings(g)
+        existing = _player_for_identity(g, identity)
+        if existing is not None:
+            user_already_in[g.code] = existing.seat
+            continue
+        # Build rating list of CURRENT players (skip guests for matchmaking).
+        users_by_id = _users_for_game(db, g)
+        ratings: list[MMPlayer] = []
+        for p in g.players:
+            if p.user_id is not None and p.user_id in users_by_id:
+                u = users_by_id[p.user_id]
+                ratings.append(MMPlayer(mu=u.rating_mu, sigma=u.rating_sigma))
+        candidates.append(MMLobby(
+            code=g.code,
+            created_at_epoch=(g.created_at.replace(tzinfo=timezone.utc).timestamp()
+                              if g.created_at and g.created_at.tzinfo is None
+                              else (g.created_at.timestamp() if g.created_at else 0)),
+            min_players=int(s.get("min_players", 2)),
+            max_players=int(s.get("max_players", 4)),
+            current_player_ratings=ratings,
+            current_player_count=len(g.players),
+        ))
+
+    # If the player already sits in any open lobby, just route them back there
+    # — picks the most-recently-created of their existing seats.
+    if user_already_in:
+        # Pick whichever they most recently joined (latest created_at)
+        latest = max(open_games, key=lambda g: g.created_at if g.code in user_already_in else None)
+        if latest.code in user_already_in:
+            return AutoJoinResponse(code=latest.code, seat=user_already_in[latest.code], action="joined")
+
+    me = identity.user
+    player_rating = MMPlayer(mu=me.rating_mu, sigma=me.rating_sigma)
+    decision, code = auto_join_pick(player_rating, candidates)
+
+    if decision == "JOIN" and code is not None:
+        # Use the same join flow (re-fetch the chosen game to add this user).
+        game = db.query(Game).filter(Game.code == code).first()
+        if game and game.status == "lobby":
+            s = _settings(game)
+            max_players = int(s.get("max_players", 4))
+            if len(game.players) < max_players:
+                seat = max((p.seat for p in game.players), default=-1) + 1
+                player = GamePlayer(
+                    game_id=game.id,
+                    user_id=me.id,
+                    guest_name=None,
+                    seat=seat,
+                    score=0,
+                )
+                db.add(player)
+                _set_name_in_settings(game, seat, identity.display_name)
+                db.add(game)
+                db.commit()
+                return AutoJoinResponse(code=game.code, seat=seat, action="joined")
+        # Fall through to create if the chosen lobby filled up between query
+        # and join (race condition; rare but possible).
+
+    # CREATE: brand-new lobby with this user as host (seat 0).
+    code = _generate_code(db)
+    game = Game(
+        code=code,
+        host_user_id=me.id,
+        status="lobby",
+        settings_json=json.dumps({
+            "min_players": req.min_players,
+            "max_players": req.max_players,
+            "turn_seconds": req.turn_seconds,
+            "names": {},
+        }),
+    )
+    db.add(game)
+    db.flush()
+    player = GamePlayer(
+        game_id=game.id,
+        user_id=me.id,
+        guest_name=None,
+        seat=0,
+        score=0,
+    )
+    db.add(player)
+    db.flush()
+    _set_name_in_settings(game, 0, identity.display_name)
+    db.add(game)
+    db.commit()
+    return AutoJoinResponse(code=game.code, seat=0, action="created")
+
+
 @router.get("/{code}", response_model=GameDetail)
 def get_game(
     code: str,
@@ -225,7 +382,7 @@ def get_game(
     game = db.query(Game).filter(Game.code == code.upper()).first()
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
-    return _detail(game, identity)
+    return _detail(game, identity, db)
 
 
 @router.post("/{code}/start", response_model=GameDetail)
@@ -265,13 +422,13 @@ def start_game(
     db.add(game)
     db.commit()
     db.refresh(game)
-    return _detail(game, identity)
+    return _detail(game, identity, db)
 
 
 # ---------- helpers ----------
 
-def _detail(game: Game, identity: Identity) -> GameDetail:
-    summary = _summary(game, None)
+def _detail(game: Game, identity: Identity, db: Session | None = None) -> GameDetail:
+    summary = _summary(game, db)
     your = _player_for_identity(game, identity)
     state = None
     card = None

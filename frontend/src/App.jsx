@@ -5,6 +5,7 @@ import SoloPlay from "./routes/SoloPlay.jsx";
 import Leaderboard from "./routes/Leaderboard.jsx";
 import Lobby from "./routes/Lobby.jsx";
 import GameRoom from "./routes/GameRoom.jsx";
+import MultiplayerLeaderboard from "./routes/MultiplayerLeaderboard.jsx";
 import Splash from "./components/Splash.jsx";
 import PaperOverlay from "./components/PaperOverlay.jsx";
 import MuteToggle from "./components/MuteToggle.jsx";
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="/leaderboard" element={<Leaderboard />} />
         <Route path="/lobby" element={<Lobby />} />
         <Route path="/game/:code" element={<GameRoom />} />
+        <Route path="/multiplayer-leaderboard" element={<MultiplayerLeaderboard />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>

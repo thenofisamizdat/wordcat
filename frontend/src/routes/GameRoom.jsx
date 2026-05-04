@@ -43,6 +43,9 @@ export default function GameRoom() {
   const [scoreBumpKey, setScoreBumpKey] = useState(0);  // bumps when MY score changes
   const [floater, setFloater] = useState(null);          // floating +N over my score
   const [shakeKey, setShakeKey] = useState(0);           // shake my tray on rejection
+  const [countdownEndsAt, setCountdownEndsAt] = useState(null);  // epoch ms; null when no countdown
+  const [countdownNow, setCountdownNow] = useState(Date.now());
+  const [ratingChanges, setRatingChanges] = useState(null); // [{seat, name, display_before, display_after, delta, ...}]
 
   // 1. Ensure we've joined this game (REST). useGameSocket then connects.
   useEffect(() => {
@@ -98,7 +101,36 @@ export default function GameRoom() {
       const id = setTimeout(() => setFlash(null), 2000);
       return () => clearTimeout(id);
     }
+    if (lastEvent.type === "countdown_started") {
+      const seconds = Number(lastEvent.seconds || 10);
+      setCountdownEndsAt(Date.now() + seconds * 1000);
+      return undefined;
+    }
+    if (lastEvent.type === "game_finished" && lastEvent.rating_changes) {
+      // Stash the rating changes so the game-over panel can render them per player.
+      setRatingChanges(lastEvent.rating_changes);
+      return undefined;
+    }
+    if (lastEvent.type === "countdown_cancelled") {
+      setCountdownEndsAt(null);
+      return undefined;
+    }
+    if (lastEvent.type === "game_started") {
+      setCountdownEndsAt(null);
+      return undefined;
+    }
   }, [lastEvent, state, yourSeat]);
+
+  // Tick the countdown display once per 200ms while a countdown is running.
+  useEffect(() => {
+    if (countdownEndsAt === null) return undefined;
+    const id = setInterval(() => {
+      const now = Date.now();
+      setCountdownNow(now);
+      if (now >= countdownEndsAt) setCountdownEndsAt(null);
+    }, 200);
+    return () => clearInterval(id);
+  }, [countdownEndsAt]);
 
   // Game-over jingle (fires once when game finishes)
   const gameoverPlayedRef = React.useRef(false);
@@ -156,21 +188,37 @@ export default function GameRoom() {
         {/* Left: scoreboard / players */}
         <aside className="sm:col-span-1 space-y-3">
           <PlayerList players={state.players || []} currentSeat={state.current_seat} yourSeat={yourSeat} bumpKey={scoreBumpKey} floater={floater} />
-          {state.status === "lobby" && (
-            <>
-              <InviteLinkButton code={code} />
-              <button
-                onClick={() => send("start")}
-                disabled={(state.players || []).length < 2}
-                className="w-full bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded py-2 disabled:opacity-40"
-              >
-                Start game
-              </button>
-              <div className="text-xs text-stone-500">
-                Need 2+ players. Anyone can press start. Currently {(state.players || []).length} in.
-              </div>
-            </>
-          )}
+          {state.status === "lobby" && (() => {
+            const playerCount = (state.players || []).length;
+            const minPlayers = state.min_players || 2;
+            const meetsMin = playerCount >= minPlayers;
+            const countdownSeconds = countdownEndsAt
+              ? Math.max(0, Math.ceil((countdownEndsAt - countdownNow) / 1000))
+              : null;
+            return (
+              <>
+                <InviteLinkButton code={code} />
+                <button
+                  onClick={() => send("start")}
+                  disabled={!meetsMin}
+                  className="w-full bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded py-2 disabled:opacity-40"
+                >
+                  {countdownSeconds !== null
+                    ? `Start now (${countdownSeconds}s left)`
+                    : meetsMin ? "Start game" : `Waiting for ${minPlayers - playerCount} more`}
+                </button>
+                <div className="text-xs text-stone-500">
+                  {playerCount}/{state.max_players || "?"} players · need {minPlayers} to start.
+                </div>
+                {countdownSeconds !== null && (
+                  <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg p-3 text-center">
+                    <div className="text-xs uppercase tracking-wider text-emerald-700">Auto-starting</div>
+                    <div className="text-3xl font-extrabold text-emerald-800 tabular-nums">{countdownSeconds}s</div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
           <div className="text-xs text-stone-600 bg-white rounded-lg p-2 border">
             Tiles in pool: <span className="font-semibold tabular-nums">{state.pool_total}</span><br/>
             Decks left: E {decksRemaining.easy} · M {decksRemaining.medium} · H {decksRemaining.hard}<br/>
@@ -185,13 +233,34 @@ export default function GameRoom() {
               <div className="text-emerald-900 font-bold text-xl">Game over!</div>
               <div className="text-stone-700 mt-1 text-sm">Reason: {state.finish_reason}</div>
               <div className="mt-3 grid gap-1 text-sm">
-                {(state.players || []).slice().sort((a,b)=>b.score-a.score).map((p, i) => (
-                  <div key={p.seat} className={`flex justify-between px-3 py-1 rounded ${i===0 ? "bg-amber-100 font-bold" : ""}`}>
-                    <span>#{i+1} {p.name}</span><span className="tabular-nums">{p.score}</span>
-                  </div>
-                ))}
+                {(state.players || []).slice().sort((a,b)=>b.score-a.score).map((p, i) => {
+                  const rc = (ratingChanges || []).find(c => c.seat === p.seat);
+                  return (
+                    <div key={p.seat} className={`flex items-center justify-between px-3 py-1 rounded ${i===0 ? "bg-amber-100 font-bold" : ""}`}>
+                      <span>#{i+1} {p.name}</span>
+                      <span className="flex items-center gap-2">
+                        {rc && (
+                          <span
+                            className={`text-xs font-bold tabular-nums ${rc.delta > 0 ? "text-emerald-700" : rc.delta < 0 ? "text-rose-700" : "text-stone-500"}`}
+                            title={`${rc.display_before} → ${rc.display_after}`}
+                          >
+                            {rc.delta > 0 ? "+" : ""}{rc.delta}
+                          </span>
+                        )}
+                        <span className="tabular-nums">{p.score}</span>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
-              <Link to="/lobby" className="inline-block mt-3 underline text-stone-700">Back to lobby</Link>
+              {ratingChanges && ratingChanges.length > 0 && (
+                <div className="text-xs text-stone-500 mt-2">Ratings updated.</div>
+              )}
+              <div className="mt-3 flex gap-2 justify-center">
+                <Link to="/lobby" className="underline text-stone-700">Back to lobby</Link>
+                <span className="text-stone-400">·</span>
+                <Link to="/multiplayer-leaderboard" className="underline text-stone-700">Top players</Link>
+              </div>
             </div>
           ) : state.status === "lobby" ? (
             <div className="rounded-xl bg-white p-6 border border-stone-200 text-center text-stone-600">

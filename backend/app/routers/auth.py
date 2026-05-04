@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -18,9 +20,11 @@ from ..schemas import (
     GuestRequest,
     LoginRequest,
     MeResponse,
+    RatingOut,
     RegisterRequest,
     TokenResponse,
 )
+from ..services.rating import rating_payload
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -59,8 +63,13 @@ def guest(req: GuestRequest):
 
 @router.get("/me", response_model=MeResponse)
 def me(identity: Identity = Depends(get_identity)):
+    rating: Optional[RatingOut] = None
+    if identity.user is not None:
+        u = identity.user
+        rating = RatingOut(**rating_payload(u.rating_mu, u.rating_sigma, u.games_played))
     return MeResponse(
         display_name=identity.display_name,
         is_guest=identity.is_guest,
         email=identity.user.email if identity.user else None,
+        rating=rating,
     )

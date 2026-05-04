@@ -1,4 +1,5 @@
 import React from "react";
+import RatingBadge from "./RatingBadge.jsx";
 
 export default function PlayerList({ players, currentSeat, yourSeat, bumpKey, floater }) {
   return (
@@ -13,9 +14,10 @@ export default function PlayerList({ players, currentSeat, yourSeat, bumpKey, fl
               isCurrent ? "bg-amber-100 border-amber-300" : "bg-white border-stone-200"
             }`}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               <span className={`inline-block w-2 h-2 rounded-full ${p.connected ? "bg-emerald-500" : "bg-stone-300"}`} />
-              <span className="font-medium">{p.name}{isYou && <span className="text-stone-500 font-normal text-xs"> (you)</span>}</span>
+              <span className="font-medium truncate">{p.name}{isYou && <span className="text-stone-500 font-normal text-xs"> (you)</span>}</span>
+              {p.rating && <RatingBadge rating={p.rating} size="sm" showTier={false} />}
               {p.is_guest && <span className="text-[0.65rem] uppercase text-stone-500">guest</span>}
               {isCurrent && <span className="text-[0.65rem] uppercase text-amber-700 font-semibold">turn</span>}
             </div>

@@ -5,6 +5,7 @@ from typing import Optional
 
 from sqlalchemy import (
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -17,6 +18,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
 
+# OpenSkill PlackettLuce defaults — keep in sync with services/rating.py.
+RATING_MU0 = 25.0
+RATING_SIGMA0 = 25.0 / 3.0  # ≈ 8.3333
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -25,6 +31,15 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     display_name: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    # Multiplayer rating (OpenSkill PlackettLuce). New users start at the
+    # default mu/sigma; ratings update at the end of every multiplayer game
+    # in which all seats are registered users. Guests' games don't move
+    # anyone's rating.
+    rating_mu: Mapped[float] = mapped_column(Float, nullable=False, default=RATING_MU0)
+    rating_sigma: Mapped[float] = mapped_column(Float, nullable=False, default=RATING_SIGMA0)
+    games_played: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rating_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class Game(Base):
@@ -88,3 +103,22 @@ class SoloRun(Base):
     finished: Mapped[int] = mapped_column(Integer, default=0)  # 0/1 boolean
     started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class RatingHistory(Base):
+    """One row per (user, multiplayer game) recording the rating before/after.
+    Used for audit trails, rating-progression charts, and rolling back if needed."""
+    __tablename__ = "rating_history"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"), index=True)
+    finishing_rank: Mapped[int] = mapped_column(Integer)        # 1 = winner, ties allowed
+    finishing_score: Mapped[int] = mapped_column(Integer)
+    mu_before: Mapped[float] = mapped_column(Float)
+    sigma_before: Mapped[float] = mapped_column(Float)
+    mu_after: Mapped[float] = mapped_column(Float)
+    sigma_after: Mapped[float] = mapped_column(Float)
+    display_before: Mapped[int] = mapped_column(Integer)
+    display_after: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

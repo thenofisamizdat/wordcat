@@ -28,10 +28,22 @@ class TokenResponse(BaseModel):
     is_guest: bool
 
 
+class RatingOut(BaseModel):
+    """Public-facing rating payload, returned everywhere a user's skill is shown."""
+    mu: float
+    sigma: float
+    display: int           # 4-digit chess-style rating
+    tier: str              # Bronze / Silver / Gold / Platinum / Diamond / Master
+    color: str             # hex colour for the tier badge
+    provisional: bool      # True until games_played >= 10 AND sigma <= 5.0
+    games_played: int
+
+
 class MeResponse(BaseModel):
     display_name: str
     is_guest: bool
     email: Optional[EmailStr] = None
+    rating: Optional[RatingOut] = None  # registered users only; None for guests
 
 
 # ---------- categories ----------
@@ -98,6 +110,7 @@ class LeaderboardOut(BaseModel):
 # ---------- multiplayer ----------
 
 class CreateGameRequest(BaseModel):
+    min_players: int = Field(default=2, ge=2, le=6)
     max_players: int = Field(default=4, ge=2, le=6)
     turn_seconds: int = Field(default=180, ge=30, le=600)
 
@@ -108,12 +121,14 @@ class GamePlayerOut(BaseModel):
     is_guest: bool
     score: int
     connected: bool = False
+    rating: Optional[RatingOut] = None  # only present for registered users
 
 
 class GameSummary(BaseModel):
     code: str
     status: str
     host_name: str
+    min_players: int = 2
     max_players: int
     turn_seconds: int
     players: list[GamePlayerOut]
@@ -135,3 +150,36 @@ class JoinGameResponse(BaseModel):
 
 class GameListOut(BaseModel):
     games: list[GameSummary]
+
+
+# ---------- multiplayer matchmaking ----------
+
+class AutoJoinRequest(BaseModel):
+    """Optional preferences if we have to fall back to creating a new lobby
+    (e.g. because no existing lobby is a good fit). When joining an existing
+    lobby these are ignored."""
+    min_players: int = Field(default=2, ge=2, le=6)
+    max_players: int = Field(default=4, ge=2, le=6)
+    turn_seconds: int = Field(default=180, ge=30, le=600)
+
+
+class AutoJoinResponse(BaseModel):
+    code: str
+    seat: int
+    action: str  # "joined" | "created"
+
+
+# ---------- multiplayer leaderboard ----------
+
+class MultiplayerLeaderboardEntry(BaseModel):
+    rank: int
+    name: str
+    display_rating: int
+    tier: str
+    color: str
+    games_played: int
+    provisional: bool
+
+
+class MultiplayerLeaderboardOut(BaseModel):
+    entries: list[MultiplayerLeaderboardEntry]
