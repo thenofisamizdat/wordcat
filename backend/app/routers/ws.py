@@ -301,6 +301,7 @@ async def _schedule_turn_timer(room: Room, code: str) -> None:
     async def _tick():
         try:
             # Re-read state each loop in case actions move the deadline.
+            import time as _t
             while True:
                 await asyncio.sleep(0.5)
                 with SessionLocal() as db:
@@ -310,23 +311,37 @@ async def _schedule_turn_timer(room: Room, code: str) -> None:
                     state = json.loads(game.state.state_json)
                     if state.get("finished"):
                         return
-                    if state.get("current_card_id") is None:
-                        # Nothing to time; check again later
-                        continue
-                    started = state.get("turn_started_at") or 0
-                    deadline = float(started) + float(state.get("turn_seconds") or 180)
-                    import time as _t
+
+                    # Overall game clock: fire when it expires regardless of
+                    # whether a card has been drawn.
+                    overall = float(state.get("overall_seconds") or 0)
+                    started_at = state.get("started_at")
+                    if overall > 0 and started_at is not None:
+                        if _t.time() >= float(started_at) + overall:
+                            engine.force_skip_if_expired(state)
+                            rating_changes = _persist(db, game, state)
+                            ev = {"type": "game_finished", "reason": "time_up"}
+                            if rating_changes is not None:
+                                ev["rating_changes"] = rating_changes
+                            await _send_state(room, db, game, event=ev)
+                            return
+
+                    # Per-turn clock: covers BOTH the pick phase and the
+                    # submit phase under the single-clock model. Fires once
+                    # the seat's turn_started_at + turn_seconds is in the past.
+                    turn_started = state.get("turn_started_at")
+                    if turn_started is None:
+                        continue  # solo at game-start, before first pick
+                    deadline = float(turn_started) + float(state.get("turn_seconds") or 180)
                     if _t.time() < deadline:
                         await asyncio.sleep(min(1.0, deadline - _t.time()))
                         continue
-                    # Fire skip
                     fired = engine.force_skip_if_expired(state)
                     if fired:
                         rating_changes = _persist(db, game, state)
                         ev = {"type": "turn_timeout"}
                         if rating_changes is not None:
-                            ev["type"] = "game_finished"
-                            ev["rating_changes"] = rating_changes
+                            ev = {"type": "game_finished", "rating_changes": rating_changes}
                         await _send_state(room, db, game, event=ev)
         except asyncio.CancelledError:
             return
@@ -350,6 +365,7 @@ async def _start_game_now(room: Room, db: Session, game: Game, *, started_by: st
         seed=seed,
         num_players=len(game.players),
         turn_seconds=int(settings_dict.get("turn_seconds", 180)),
+        overall_seconds=int(settings_dict.get("overall_seconds", 300)),
     )
     game.status = "active"
     game.started_at = datetime.now(timezone.utc)
@@ -495,14 +511,37 @@ async def ws_game(
                 if action == "pick":
                     tier = msg.get("tier")
                     res = engine.pick_difficulty(state, seat=player.seat, tier=tier)
-                    if not res["ok"]:
-                        await websocket.send_json({"type": "action_rejected", "action": "pick", "reason": res["reason"]})
+                    redraws = res.get("redraws") or []
+                    if res["ok"]:
+                        # Successful pick (possibly after some impossible cards
+                        # were auto-redrawn from the same tier).
+                        ev = {"type": "card_drawn",
+                              "card_id": res["card_id"], "tier": tier,
+                              "seat": player.seat,
+                              "redraws": redraws}
+                    elif res.get("skipped"):
+                        # Engine consumed the turn because every redraw was
+                        # unplayable. Tell clients so they can show the
+                        # "no words possible" toast.
+                        ev = {"type": "card_unplayable",
+                              "seat": player.seat, "tier": tier,
+                              "redraws": redraws}
+                    else:
+                        await websocket.send_json({
+                            "type": "action_rejected", "action": "pick",
+                            "reason": res["reason"],
+                        })
+                        ev = None
+
                     rc = _persist(db, game, state)
-                    ev = {"type": "card_drawn" if res["ok"] else "noop"}
                     if rc is not None:
-                        ev = {"type": "game_finished", "rating_changes": rc}
+                        ev = {"type": "game_finished", "rating_changes": rc,
+                              "card_unplayable_redraws": redraws or None}
                     await _send_state(room, db, game, event=ev)
                     if res["ok"]:
+                        await _schedule_turn_timer(room, code)
+                    elif res.get("skipped"):
+                        # Forced-skip moves us to the next seat — re-arm the timer.
                         await _schedule_turn_timer(room, code)
                     continue
 

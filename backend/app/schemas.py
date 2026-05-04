@@ -113,6 +113,9 @@ class CreateGameRequest(BaseModel):
     min_players: int = Field(default=2, ge=2, le=6)
     max_players: int = Field(default=4, ge=2, le=6)
     turn_seconds: int = Field(default=180, ge=30, le=600)
+    # Overall game clock (multiplayer). Settable from 5 minutes upwards.
+    # Once it expires the game ends with reason "time_up".
+    overall_seconds: int = Field(default=300, ge=300, le=3600)
 
 
 class GamePlayerOut(BaseModel):
@@ -131,6 +134,7 @@ class GameSummary(BaseModel):
     min_players: int = 2
     max_players: int
     turn_seconds: int
+    overall_seconds: int = 300
     players: list[GamePlayerOut]
     created_at: str
 
@@ -161,6 +165,7 @@ class AutoJoinRequest(BaseModel):
     min_players: int = Field(default=2, ge=2, le=6)
     max_players: int = Field(default=4, ge=2, le=6)
     turn_seconds: int = Field(default=180, ge=30, le=600)
+    overall_seconds: int = Field(default=300, ge=300, le=3600)
 
 
 class AutoJoinResponse(BaseModel):

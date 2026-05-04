@@ -99,6 +99,7 @@ def _summary(game: Game, db: Session | None, *, connected_seats: set[int] | None
         min_players=int(s.get("min_players", 2)),
         max_players=int(s.get("max_players", 4)),
         turn_seconds=int(s.get("turn_seconds", 180)),
+        overall_seconds=int(s.get("overall_seconds", 300)),
         players=[_player_out(p, connected_seats, users_by_id)
                  for p in sorted(game.players, key=lambda x: x.seat)],
         created_at=(game.created_at or datetime.now(timezone.utc)).isoformat(),
@@ -175,6 +176,7 @@ def create_game(
             "min_players": req.min_players,
             "max_players": req.max_players,
             "turn_seconds": req.turn_seconds,
+            "overall_seconds": req.overall_seconds,
             "names": {},
         }),
     )
@@ -353,6 +355,7 @@ def auto_join(
             "min_players": req.min_players,
             "max_players": req.max_players,
             "turn_seconds": req.turn_seconds,
+            "overall_seconds": req.overall_seconds,
             "names": {},
         }),
     )

@@ -8,6 +8,9 @@ import WordTray from "../components/WordTray.jsx";
 import CategoryCard from "../components/CategoryCard.jsx";
 import DifficultyPicker from "../components/DifficultyPicker.jsx";
 import Timer from "../components/Timer.jsx";
+import OverallTimer from "../components/OverallTimer.jsx";
+import BurnedTiles from "../components/BurnedTiles.jsx";
+import ResultToast from "../components/ResultToast.jsx";
 import PlayerList from "../components/PlayerList.jsx";
 import InviteLinkButton from "../components/InviteLinkButton.jsx";
 import { play } from "../sounds.js";
@@ -28,9 +31,19 @@ const REJECTION_REASONS = {
   already_started: "Game already started.",
   not_in_game: "You haven't joined this game.",
   not_found: "Game not found.",
-  unauthorized: "Sign in or rejoin as a guest."
+  unauthorized: "Sign in or rejoin as a guest.",
+  no_words_possible: "No playable words for those cards — turn skipped.",
+  time_up: "Time's up!"
+};
+const FINISH_REASON_TEXT = {
+  pool_empty: "The shared pool is empty.",
+  decks_empty: "All category decks are exhausted.",
+  all_skipped: "All players skipped.",
+  pool_exhausted: "Nobody can play anything from what's left.",
+  time_up: "Time's up!",
 };
 function reasonText(r) { return REJECTION_REASONS[r] || r || "Something went wrong"; }
+function finishText(r) { return FINISH_REASON_TEXT[r] || r || ""; }
 
 export default function GameRoom() {
   const { code } = useParams();
@@ -46,6 +59,8 @@ export default function GameRoom() {
   const [countdownEndsAt, setCountdownEndsAt] = useState(null);  // epoch ms; null when no countdown
   const [countdownNow, setCountdownNow] = useState(Date.now());
   const [ratingChanges, setRatingChanges] = useState(null); // [{seat, name, display_before, display_after, delta, ...}]
+  const [toast, setToast] = useState(null);              // {token, kind, detail} for ResultToast
+  const [dud, setDud] = useState(null);                  // {letter, key} for burned-tile flash
 
   // 1. Ensure we've joined this game (REST). useGameSocket then connects.
   useEffect(() => {
@@ -68,6 +83,7 @@ export default function GameRoom() {
     if (lastError.kind === "submit") {
       play("reject");
       setShakeKey((k) => k + 1);
+      setToast({ token: Date.now(), kind: "bad", detail: reasonText(lastError.reason) });
     }
     setFlash({ kind: "bad", text: reasonText(lastError.reason) });
     const id = setTimeout(() => setFlash(null), 3000);
@@ -78,6 +94,8 @@ export default function GameRoom() {
     if (lastEvent.type === "word_accepted") {
       play("accept");
       setFlash({ kind: "good", text: `${state?.players?.[lastEvent.seat]?.name || "Player"} +${lastEvent.points} for ${lastEvent.word}` });
+      setToast({ token: Date.now(), kind: "good",
+                 detail: `${state?.players?.[lastEvent.seat]?.name || "Player"} +${lastEvent.points} for ${lastEvent.word}` });
       // If it was our seat, clear tray + animate.
       if (lastEvent.seat === yourSeat) {
         setPicked([]);
@@ -86,6 +104,25 @@ export default function GameRoom() {
         setTimeout(() => setFloater(null), 1100);
       }
       const id = setTimeout(() => setFlash(null), 2500);
+      return () => clearTimeout(id);
+    }
+    if (lastEvent.type === "card_drawn" && (lastEvent.redraws || []).length > 0) {
+      // The pick produced a playable card, but only after one or more
+      // unplayable cards were auto-redrawn from the same tier.
+      const n = lastEvent.redraws.length;
+      setFlash({ kind: "neutral",
+                 text: `No words possible from ${n} card${n > 1 ? "s" : ""} — drew another.` });
+      const id = setTimeout(() => setFlash(null), 2500);
+      return () => clearTimeout(id);
+    }
+    if (lastEvent.type === "card_unplayable") {
+      // The pick exhausted the redraw budget — turn skipped.
+      play("timeout");
+      const who = state?.players?.[lastEvent.seat]?.name || "Player";
+      setFlash({ kind: "bad",
+                 text: `${who}: no playable cards — turn skipped.` });
+      if (lastEvent.seat === yourSeat) setPicked([]);
+      const id = setTimeout(() => setFlash(null), 3000);
       return () => clearTimeout(id);
     }
     if (lastEvent.type === "turn_timeout") {
@@ -145,6 +182,64 @@ export default function GameRoom() {
   const onPickLetter = useCallback((L) => setPicked((p) => [...p, L]), []);
   const onRemoveAt = useCallback((idx) => setPicked((p) => p.filter((_, i) => i !== idx)), []);
   const onClear = useCallback(() => setPicked([]), []);
+
+  // Trigger the burned-letter "dud" feedback (sound + flashing rack tile).
+  const fireDud = useCallback((L) => {
+    play("dud");
+    setDud({ letter: L, key: Date.now() });
+    setTimeout(() => setDud((d) => (d && d.letter === L ? null : d)), 520);
+  }, []);
+
+  // Keyboard input — parity with SoloPlay. Only active during the player's
+  // own turn with a card drawn.
+  useEffect(() => {
+    if (!state || state.finished) return undefined;
+    const cardOpen = !!state.current_card_id;
+    const myTurnNow = state.current_seat === yourSeat;
+    if (!myTurnNow) return undefined;
+    const onKey = (e) => {
+      const tag = (e.target?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || e.target?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      if (e.key === "Enter") {
+        if (cardOpen && picked.length > 0) {
+          e.preventDefault();
+          send("submit", { word: picked.join("") });
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        if (cardOpen && picked.length > 0) { e.preventDefault(); onClear(); }
+        return;
+      }
+      if (e.key === "Backspace") {
+        if (cardOpen && picked.length > 0) {
+          e.preventDefault();
+          play("untile");
+          setPicked((p) => p.slice(0, -1));
+        }
+        return;
+      }
+      if (!cardOpen) return;
+      if (e.key.length === 1 && /^[a-zA-Z]$/.test(e.key)) {
+        const L = e.key.toUpperCase();
+        const poolCount = (state.pool_counts || {})[L] || 0;
+        const usedInTray = picked.filter((p) => p === L).length;
+        const burnedCount = (state.discarded_counts || {})[L] || 0;
+        if (poolCount - usedInTray > 0) {
+          e.preventDefault();
+          play("tile");
+          setPicked((p) => [...p, L]);
+        } else if (burnedCount > 0) {
+          e.preventDefault();
+          fireDud(L);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state, picked, yourSeat, send, onClear, fireDud]);
 
   const isMyTurn = state && yourSeat === state.current_seat;
   const cardDrawn = state && state.current_card_id;
@@ -231,7 +326,7 @@ export default function GameRoom() {
           {state.finished ? (
             <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-5 text-center">
               <div className="text-emerald-900 font-bold text-xl">Game over!</div>
-              <div className="text-stone-700 mt-1 text-sm">Reason: {state.finish_reason}</div>
+              <div className="text-stone-700 mt-1 text-sm">{finishText(state.finish_reason)}</div>
               <div className="mt-3 grid gap-1 text-sm">
                 {(state.players || []).slice().sort((a,b)=>b.score-a.score).map((p, i) => {
                   const rc = (ratingChanges || []).find(c => c.seat === p.seat);
@@ -268,13 +363,26 @@ export default function GameRoom() {
             </div>
           ) : (
             <>
+              {/* Overall game clock — always visible during active play. */}
+              {state.overall_seconds > 0 && state.started_at && (
+                <OverallTimer startedAt={state.started_at} total={state.overall_seconds} />
+              )}
+
+              {/* Per-turn clock — single-clock model: covers BOTH the pick
+                  and the submit phase. Visible whenever there's a current seat. */}
+              {state.turn_started_at && (
+                <Timer startedAt={state.turn_started_at} totalSeconds={state.turn_seconds} />
+              )}
+
               {!cardDrawn ? (
                 <>
                   {isMyTurn ? (
                     <>
                       <div className="text-stone-700">Your turn — pick a difficulty to draw a category card.</div>
                       <DifficultyPicker remaining={decksRemaining} onPick={(t)=>send("pick", { tier: t })} />
-                      <div className="text-xs text-stone-500">Easy ×1, Medium ×1.5, Hard ×2.</div>
+                      <div className="text-xs text-stone-500">
+                        Easy ×1, Medium ×1.5, Hard ×2. The clock above ticks for picking AND playing.
+                      </div>
                     </>
                   ) : (
                     <div className="rounded-xl bg-stone-100 p-6 text-center text-stone-700">
@@ -285,7 +393,6 @@ export default function GameRoom() {
               ) : (
                 <>
                   <CategoryCard card={state.current_card} />
-                  <Timer startedAt={state.turn_started_at} totalSeconds={state.turn_seconds} />
 
                   {isMyTurn ? (
                     <>
@@ -304,12 +411,13 @@ export default function GameRoom() {
                         <button
                           onClick={() => { send("submit", { word: picked.join("") }); }}
                           disabled={picked.length === 0}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded font-semibold disabled:opacity-40">
+                          className="play-tile play-tile-good"
+                          title="Submit (Enter)">
                           Submit
                         </button>
                         <button
                           onClick={() => { send("skip"); setPicked([]); }}
-                          className="bg-stone-300 hover:bg-stone-400 text-stone-900 px-4 py-2 rounded font-semibold">
+                          className="play-tile">
                           Skip
                         </button>
                       </div>
@@ -338,10 +446,21 @@ export default function GameRoom() {
                 onPick={isMyTurn && cardDrawn ? onPickLetter : undefined}
                 picked={picked}
               />
+
+              {/* Burned-tile rack: red-tinted dimmed tiles for everything spent. */}
+              <BurnedTiles
+                counts={state.discarded_counts || {}}
+                values={letterValues}
+                dudKey={dud?.key}
+                dudLetter={dud?.letter}
+                onDud={isMyTurn && cardDrawn ? (L) => fireDud(L) : undefined}
+              />
             </>
           )}
         </section>
       </div>
+
+      {toast && <ResultToast token={toast.token} kind={toast.kind} detail={toast.detail} />}
     </div>
   );
 }

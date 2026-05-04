@@ -17,12 +17,19 @@ from .words import (
     in_category,
     in_dictionary,
     letters_available,
+    load_category_words,
     normalize_word,
     pool_to_counts,
     remove_letters,
 )
 
 VALID_TIERS = ("easy", "medium", "hard")
+# When a drawn card has no playable words, we auto-redraw up to this many times
+# from the same tier before consuming the player's turn as a forced skip.
+MAX_POOL_REDRAWS_PER_TURN = 3
+# If three players in a row hit the redraw limit (i.e. nobody can play with
+# what's left), the game ends — the pool is too depleted to continue.
+MAX_CONSECUTIVE_POOL_SKIPS = 3
 
 
 # ---------- state construction ----------
@@ -108,8 +115,24 @@ def new_state(
         "current_seat": 0,
         "current_card_id": None,
         "current_difficulty": None,
-        "turn_started_at": None,
+        # The per-turn timer starts when a seat becomes the current seat. In
+        # multiplayer (num_players > 1) we seed it immediately so seat 0 is on
+        # the clock from game-start (single-clock model — picking + submitting
+        # both come out of the same turn_seconds budget). In solo mode we leave
+        # it None so the clock only starts when the player picks a difficulty.
+        "turn_started_at": _now() if num_players > 1 else None,
         "consecutive_skips": 0,
+        # When a card is drawn but no word in its category is playable from the
+        # current pool, we auto-redraw a fresh card from the same tier. This
+        # counter tracks how many times that has happened on the CURRENT turn;
+        # after MAX_POOL_REDRAWS_PER_TURN we treat the turn as a forced skip
+        # and bump consecutive_pool_skips.
+        "consecutive_pool_redraws": 0,
+        # If MAX_CONSECUTIVE_POOL_SKIPS players in a row each exhausted their
+        # redraws without finding a playable card, the pool is too depleted
+        # and the game ends with reason "pool_exhausted". Resets on any
+        # successful word.
+        "consecutive_pool_skips": 0,
         "history": [],
         "finished": False,
         "finish_reason": None,
@@ -125,6 +148,10 @@ def _now() -> float:
 
 def _advance_seat(state: dict) -> None:
     state["current_seat"] = (state["current_seat"] + 1) % state["num_players"]
+    # Re-arm the per-turn timer for the new seat. Picking + submitting both
+    # come out of this single budget.
+    state["turn_started_at"] = _now()
+    state["consecutive_pool_redraws"] = 0
 
 
 def _overall_expired(state: dict) -> bool:
@@ -146,7 +173,19 @@ def _check_end(state: dict) -> Optional[str]:
         return "decks_empty"
     if state["consecutive_skips"] >= state["num_players"]:
         return "all_skipped"
+    if state.get("consecutive_pool_skips", 0) >= MAX_CONSECUTIVE_POOL_SKIPS:
+        return "pool_exhausted"
     return None
+
+
+def _words_possible(pool_counts: dict[str, int], category_id: str) -> bool:
+    """True iff at least one word in the category's wordlist can be formed
+    from the current pool (every letter of the word has enough copies in pool)."""
+    words = load_category_words(category_id)
+    for w in words:
+        if letters_available(w, pool_counts):
+            return True
+    return False
 
 
 def _maybe_finish(state: dict) -> None:
@@ -188,7 +227,22 @@ def public_view(state: dict) -> dict:
 # ---------- actions ----------
 
 def pick_difficulty(state: dict, seat: int, tier: str) -> dict:
-    """Player at `seat` declares a difficulty; we draw the top card from that tier's deck."""
+    """Player at `seat` declares a difficulty; we draw the top card from that
+    tier's deck.
+
+    If the drawn card has no playable words from the current pool, we
+    auto-redraw a fresh card from the SAME tier (without burning the turn)
+    up to MAX_POOL_REDRAWS_PER_TURN times. If we exhaust that budget, the
+    turn is force-skipped (with reason 'no_words_possible') and the
+    consecutive_pool_skips counter ticks toward the pool-exhausted end
+    condition.
+
+    Returns dict with shape:
+      success:    {ok: True, card_id, tier, redraws: [list_of_skipped_card_ids]}
+      retry-fail: {ok: False, reason: 'no_words_possible',
+                   redraws: [...], skipped: True}  (turn was burned)
+      precondition error: {ok: False, reason: <code>}  (no state change)
+    """
     if state["finished"]:
         return {"ok": False, "reason": "game_finished"}
     # Overall game timer takes precedence over per-action checks.
@@ -204,18 +258,68 @@ def pick_difficulty(state: dict, seat: int, tier: str) -> dict:
     deck = state["decks"][tier]
     if not deck:
         return {"ok": False, "reason": "deck_empty"}
-    card_id = deck.pop()  # treat tail as top
-    state["current_card_id"] = card_id
-    state["current_difficulty"] = tier
-    state["turn_started_at"] = _now()
-    state["history"].append({
-        "type": "card_drawn",
-        "seat": seat,
-        "tier": tier,
-        "card_id": card_id,
-        "ts": state["turn_started_at"],
-    })
-    return {"ok": True, "card_id": card_id, "tier": tier}
+
+    # In MULTIPLAYER the turn timer was seeded when this seat became current —
+    # picking comes out of that budget. In SOLO mode there's no other player to
+    # cycle from, so the clock starts on the very first pick.
+    if state.get("turn_started_at") is None:
+        state["turn_started_at"] = _now()
+
+    pool_counts = pool_to_counts(state["pool"])
+    redraws: list[str] = []
+    state["consecutive_pool_redraws"] = 0
+
+    while True:
+        if not state["decks"][tier]:
+            # Ran out of cards in this tier mid-redraw — treat as a forced skip.
+            for cid in redraws:
+                state["history"].append({
+                    "type": "card_redrawn",
+                    "seat": seat, "tier": tier, "card_id": cid,
+                    "reason": "no_words_possible", "ts": _now(),
+                })
+            state["consecutive_pool_skips"] += 1
+            _do_skip(state, seat, reason="no_words_possible_deck_empty")
+            _maybe_finish(state)
+            return {"ok": False, "reason": "no_words_possible",
+                    "redraws": redraws, "skipped": True}
+
+        card_id = state["decks"][tier].pop()
+        if _words_possible(pool_counts, card_id):
+            state["current_card_id"] = card_id
+            state["current_difficulty"] = tier
+            state["consecutive_pool_redraws"] = 0
+            for cid in redraws:
+                state["history"].append({
+                    "type": "card_redrawn",
+                    "seat": seat, "tier": tier, "card_id": cid,
+                    "reason": "no_words_possible", "ts": _now(),
+                })
+                state["discarded_cards"].append(cid)
+            state["history"].append({
+                "type": "card_drawn",
+                "seat": seat, "tier": tier, "card_id": card_id,
+                "ts": _now(),
+            })
+            return {"ok": True, "card_id": card_id, "tier": tier, "redraws": redraws}
+
+        # Card unplayable → discard, count it, try again from same tier.
+        redraws.append(card_id)
+        state["consecutive_pool_redraws"] += 1
+        if state["consecutive_pool_redraws"] >= MAX_POOL_REDRAWS_PER_TURN:
+            # Exhausted redraw budget — burn the turn.
+            for cid in redraws:
+                state["history"].append({
+                    "type": "card_redrawn",
+                    "seat": seat, "tier": tier, "card_id": cid,
+                    "reason": "no_words_possible", "ts": _now(),
+                })
+                state["discarded_cards"].append(cid)
+            state["consecutive_pool_skips"] += 1
+            _do_skip(state, seat, reason="no_words_possible")
+            _maybe_finish(state)
+            return {"ok": False, "reason": "no_words_possible",
+                    "redraws": redraws, "skipped": True}
 
 
 def submit_word(state: dict, seat: int, word: str) -> dict:
@@ -264,8 +368,8 @@ def submit_word(state: dict, seat: int, word: str) -> dict:
     })
     state["current_card_id"] = None
     state["current_difficulty"] = None
-    state["turn_started_at"] = None
     state["consecutive_skips"] = 0
+    state["consecutive_pool_skips"] = 0
     _advance_seat(state)
     _maybe_finish(state)
     return {"ok": True, "word": norm, "points": pts}
@@ -287,15 +391,19 @@ def skip(state: dict, seat: int, *, reason: str = "voluntary") -> dict:
 def force_skip_if_expired(state: dict) -> bool:
     """Idempotent helper for callers polling the state. Returns True if a skip
     or game-end fired. Handles BOTH the per-turn timeout AND the overall-game
-    timeout."""
+    timeout.
+
+    The per-turn timer covers BOTH the pick phase and the submit phase under
+    the single-clock model — picking a difficulty doesn't re-arm the clock,
+    it just keeps counting down. So we fire a timeout whenever the seat's
+    clock has expired, regardless of whether a card has been drawn yet.
+    """
     if state["finished"]:
         return False
     # Overall-game expiry beats per-turn expiry.
     if _overall_expired(state):
         _maybe_finish(state)
         return True
-    if state["current_card_id"] is None:
-        return False
     if _turn_expired(state):
         _do_skip(state, state["current_seat"], reason="timeout")
         _maybe_finish(state)
@@ -317,7 +425,9 @@ def _do_skip(state: dict, seat: int, *, reason: str) -> None:
     })
     state["current_card_id"] = None
     state["current_difficulty"] = None
-    state["turn_started_at"] = None
+    # NB: don't clear turn_started_at — _advance_seat re-arms it for the
+    # NEW current seat. Clearing it here would race with the new seat's
+    # immediate timer check.
     state["consecutive_skips"] += 1
     _advance_seat(state)
 

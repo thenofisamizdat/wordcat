@@ -12,6 +12,7 @@ export default function Lobby() {
   const [minPlayers, setMinPlayers] = useState(2);
   const [maxPlayers, setMaxPlayers] = useState(4);
   const [turnSeconds, setTurnSeconds] = useState(180);
+  const [overallMinutes, setOverallMinutes] = useState(5);
   const [joinCode, setJoinCode] = useState("");
 
   const refresh = useCallback(async () => {
@@ -40,11 +41,12 @@ export default function Lobby() {
         min_players: Number(minPlayers),
         max_players: Number(maxPlayers),
         turn_seconds: Number(turnSeconds),
+        overall_seconds: Number(overallMinutes) * 60,
       });
       nav(`/game/${r.code}`);
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
-  }, [minPlayers, maxPlayers, turnSeconds, nav]);
+  }, [minPlayers, maxPlayers, turnSeconds, overallMinutes, nav]);
 
   const autoJoin = useCallback(async () => {
     if (isGuest) {
@@ -57,11 +59,12 @@ export default function Lobby() {
         min_players: Number(minPlayers),
         max_players: Number(maxPlayers),
         turn_seconds: Number(turnSeconds),
+        overall_seconds: Number(overallMinutes) * 60,
       });
       nav(`/game/${r.code}`);
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
-  }, [isGuest, minPlayers, maxPlayers, turnSeconds, nav]);
+  }, [isGuest, minPlayers, maxPlayers, turnSeconds, overallMinutes, nav]);
 
   const join = useCallback(async (code) => {
     setBusy(true); setError(null);
@@ -131,6 +134,18 @@ export default function Lobby() {
               <option value={300}>5 min</option>
             </select>
           </label>
+          <label className="text-sm">
+            <div className="text-xs text-stone-500">Game length</div>
+            <select value={overallMinutes} onChange={e=>setOverallMinutes(Number(e.target.value))} className="border rounded px-2 py-1">
+              <option value={5}>5 min</option>
+              <option value={10}>10 min</option>
+              <option value={15}>15 min</option>
+              <option value={20}>20 min</option>
+              <option value={30}>30 min</option>
+              <option value={45}>45 min</option>
+              <option value={60}>60 min</option>
+            </select>
+          </label>
           <button onClick={create} disabled={busy}
             className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded font-semibold disabled:opacity-40">
             Create &amp; share invite
@@ -171,7 +186,7 @@ export default function Lobby() {
                   <div>
                     <div className="font-mono text-lg font-bold tracking-widest">{g.code}</div>
                     <div className="text-xs text-stone-500">
-                      Host: {g.host_name} · {g.players.length}/{g.max_players} players (min {g.min_players}) · {g.turn_seconds}s turns
+                      Host: {g.host_name} · {g.players.length}/{g.max_players} players (min {g.min_players}) · {g.turn_seconds}s turns · {Math.round((g.overall_seconds || 300) / 60)}m game
                       {ratedAvg !== null && <> · avg rating ~{ratedAvg}</>}
                     </div>
                   </div>
