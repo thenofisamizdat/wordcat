@@ -1,0 +1,214 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1330 800" role="img" aria-label="WordCat — a tile-based word game">
+  <defs>
+    <filter id="wobble" x="-2%" y="-2%" width="104%" height="104%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.018" numOctaves="2" seed="7" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.6"/>
+    </filter>
+    <filter id="wobbleStrong" x="-2%" y="-2%" width="104%" height="104%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.022" numOctaves="2" seed="17" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="3.4"/>
+    </filter>
+    <radialGradient id="halo" cx="50%" cy="50%" r="55%">
+      <stop offset="0%"  stop-color="#fffaf0" stop-opacity="0.97"/>
+      <stop offset="60%" stop-color="#fffaf0" stop-opacity="0.92"/>
+      <stop offset="85%" stop-color="#fffaf0" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#fffaf0" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Clip the halo to the visible alphabet-grid region so its edge can never spill outside the page artwork. -->
+    <clipPath id="haloClip">
+      <rect x="40" y="20" width="1280" height="720" rx="6" ry="6"/>
+    </clipPath>
+    <style>
+      .ink { stroke: #1f1408; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+      .tile-fill { fill: #fff8e8; }
+      .ink-thin { stroke: #1f1408; stroke-width: 3; fill: none; }
+      .ink-bg { stroke: #1f1408; stroke-width: 6; fill: none; opacity: 0.42; }
+      .letter { font-family: "Comic Sans MS", "Marker Felt", "Bradley Hand", system-ui, sans-serif; font-weight: 800; fill: #1f1408; }
+      .tagline { font-family: "Marker Felt", "Comic Sans MS", "Bradley Hand", system-ui, sans-serif; fill: #1f1408; }
+    </style>
+  </defs>
+
+  <!-- Faded alphabet-tile background grid: 7 cols x 5 rows, top row spells WORDCAT -->
+  <g opacity="0.22" filter="url(#wobbleStrong)" class="ink-bg" font-family="Marker Felt, Comic Sans MS, system-ui" font-size="78" font-weight="800" text-anchor="middle">
+    <!-- Horizontal-ish wobbly grid lines -->
+    <path d="M40 30 Q300 18 660 28 T1310 30"/>
+    <path d="M30 170 Q310 158 660 174 T1310 168"/>
+    <path d="M40 320 Q320 305 660 318 T1310 322"/>
+    <path d="M30 470 Q300 458 660 472 T1310 466"/>
+    <path d="M40 610 Q320 600 660 612 T1310 614"/>
+    <path d="M30 740 Q310 730 660 742 T1310 740"/>
+
+    <!-- Vertical-ish wobbly grid lines (8 lines = 7 cols, ~190 wide) -->
+    <path d="M50 25 Q42 220 56 420 T48 745"/>
+    <path d="M240 28 Q250 220 238 420 T246 742"/>
+    <path d="M430 25 Q420 220 434 420 T426 740"/>
+    <path d="M620 28 Q628 220 618 420 T624 744"/>
+    <path d="M810 25 Q800 220 814 420 T806 742"/>
+    <path d="M1000 28 Q1010 220 998 420 T1004 740"/>
+    <path d="M1190 25 Q1180 220 1194 420 T1186 740"/>
+    <path d="M1310 25 Q1302 220 1316 420 T1308 744"/>
+
+    <g fill="#1f1408" stroke="none" opacity="0.78">
+      <!-- Row 1: W O R D C A T -->
+      <text x="145" y="120">W</text><text x="335" y="118">O</text><text x="525" y="124">R</text>
+      <text x="715" y="116">D</text><text x="905" y="122">C</text><text x="1095" y="118">A</text>
+      <text x="1250" y="120">T</text>
+
+      <!-- Row 2 -->
+      <text x="145" y="266">K</text><text x="335" y="262">F</text><text x="525" y="270">V</text>
+      <text x="715" y="266">L</text><text x="905" y="268">E</text><text x="1095" y="266">U</text>
+      <text x="1250" y="266">S</text>
+
+      <!-- Row 3 -->
+      <text x="145" y="412">A</text><text x="335" y="410">T</text><text x="525" y="416">W</text>
+      <text x="715" y="410">J</text><text x="905" y="412">I</text><text x="1095" y="414">N</text>
+      <text x="1250" y="412">P</text>
+
+      <!-- Row 4 -->
+      <text x="145" y="558">H</text><text x="335" y="560">B</text><text x="525" y="558">Q</text>
+      <text x="715" y="562">O</text><text x="905" y="558">H</text><text x="1095" y="556">M</text>
+      <text x="1250" y="558">R</text>
+
+      <!-- Row 5 -->
+      <text x="145" y="704">X</text><text x="335" y="700">Y</text><text x="525" y="706">G</text>
+      <text x="715" y="702">M</text><text x="905" y="704">F</text><text x="1095" y="700">H</text>
+      <text x="1250" y="702">D</text>
+    </g>
+  </g>
+
+  <!-- Almost-opaque halo behind foreground wordmark and tagline.
+       Clipped to the visible grid bounds so its faded edge never spills past
+       the alphabet-grid background into the empty page area. -->
+  <g clip-path="url(#haloClip)">
+    <ellipse cx="665" cy="430" rx="600" ry="320" fill="url(#halo)"/>
+  </g>
+
+  <!-- Foreground wordmark: WORDCAT -->
+  <g filter="url(#wobble)">
+
+    <!-- Tile 1: W with cat face.
+         Drawn as an unmistakably feline portrait that fills the tile:
+           - Wide rounded-trapezoid head (cat-like cheek/jaw shape)
+           - Tall triangular ears with pink inner-ear
+           - Almond eyes with vertical-slit pupils + tiny highlights
+           - Snout with whisker-pad bumps and inverted-triangle pink nose
+           - Long curving whiskers extending past the face
+    -->
+    <g transform="translate(369,180)">
+      <!-- tile background -->
+      <path class="tile-fill ink-thin" d="M6 10 L138 6 L142 142 L8 144 Z" stroke-width="6"/>
+
+      <!-- Ears (taller, sharper triangles) -->
+      <path class="ink" stroke-width="5" stroke-linejoin="round" fill="#fff8e8" d="M22 50 L34 12 L56 44 Z"/>
+      <path class="ink" stroke-width="5" stroke-linejoin="round" fill="#fff8e8" d="M126 50 L114 12 L92 44 Z"/>
+      <!-- inner ears (pink) -->
+      <path d="M30 44 L36 22 L48 42 Z" fill="#f1a7b8" opacity="0.85"/>
+      <path d="M118 44 L112 22 L100 42 Z" fill="#f1a7b8" opacity="0.85"/>
+
+      <!-- Head: wide rounded shape (cheek bulges + tapered chin) -->
+      <path class="ink-thin" stroke-width="5" fill="#fff8e8"
+            d="M28 56
+               Q22 78 30 96
+               Q38 118 60 124
+               Q74 128 88 124
+               Q110 118 118 96
+               Q126 78 120 56
+               Q108 46 92 48
+               Q74 50 56 48
+               Q40 46 28 56 Z"/>
+
+      <!-- Eyes: classic almond shape -->
+      <path d="M44 78 Q54 70 64 78 Q54 86 44 78 Z" fill="#fff8e8" stroke="#1f1408" stroke-width="2.2"/>
+      <path d="M84 78 Q94 70 104 78 Q94 86 84 78 Z" fill="#fff8e8" stroke="#1f1408" stroke-width="2.2"/>
+      <!-- Pupils: vertical slits (very feline) -->
+      <ellipse cx="54" cy="78" rx="2.2" ry="6" fill="#1f1408"/>
+      <ellipse cx="94" cy="78" rx="2.2" ry="6" fill="#1f1408"/>
+      <!-- Eye highlights -->
+      <circle cx="56.5" cy="75" r="1.1" fill="#fff8e8"/>
+      <circle cx="96.5" cy="75" r="1.1" fill="#fff8e8"/>
+
+      <!-- Snout / muzzle area: two soft cheek bumps below the eyes -->
+      <path class="ink-thin" stroke-width="2" fill="none"
+            d="M58 102 Q66 108 74 102 Q82 108 90 102"/>
+      <!-- Pink triangle nose -->
+      <path d="M68 92 L80 92 L74 100 Z" fill="#f1a7b8" stroke="#1f1408" stroke-width="2"/>
+      <!-- Mouth -->
+      <path class="ink" stroke-width="2.5" d="M74 100 L74 104"/>
+      <path class="ink" stroke-width="2.5" d="M74 104 Q68 110 62 106"/>
+      <path class="ink" stroke-width="2.5" d="M74 104 Q80 110 86 106"/>
+
+      <!-- Whiskers: 3 long curving lines per side, extending beyond the face -->
+      <path class="ink" stroke-width="1.8" d="M14 96 Q34 96 56 100"/>
+      <path class="ink" stroke-width="1.8" d="M14 104 Q34 104 56 106"/>
+      <path class="ink" stroke-width="1.8" d="M16 112 Q36 112 56 112"/>
+      <path class="ink" stroke-width="1.8" d="M134 96 Q114 96 92 100"/>
+      <path class="ink" stroke-width="1.8" d="M134 104 Q114 104 92 106"/>
+      <path class="ink" stroke-width="1.8" d="M132 112 Q112 112 92 112"/>
+
+      <!-- Tile letter value pip -->
+      <text x="124" y="138" class="letter" font-size="16" text-anchor="end">4</text>
+    </g>
+
+    <!-- Tile 2: O with paw print -->
+    <g transform="translate(519,182)">
+      <path class="tile-fill ink-thin" d="M4 8 L138 12 L142 144 L6 142 Z" stroke-width="6"/>
+      <ellipse cx="72" cy="76" rx="46" ry="46" class="ink-thin" stroke-width="4" fill="none" opacity="0.35"/>
+      <ellipse cx="72" cy="86" rx="22" ry="18" fill="#1f1408"/>
+      <ellipse cx="46" cy="62" rx="9" ry="11" fill="#1f1408"/>
+      <ellipse cx="64" cy="46" rx="9" ry="11" fill="#1f1408"/>
+      <ellipse cx="84" cy="46" rx="9" ry="11" fill="#1f1408"/>
+      <ellipse cx="100" cy="62" rx="9" ry="11" fill="#1f1408"/>
+      <text x="124" y="138" class="letter" font-size="16" text-anchor="end">1</text>
+    </g>
+
+    <!-- Tile 3: R -->
+    <g transform="translate(669,184)">
+      <path class="tile-fill ink-thin" d="M6 6 L140 10 L138 142 L4 144 Z" stroke-width="6"/>
+      <text x="72" y="108" class="letter" font-size="92" text-anchor="middle">R</text>
+      <text x="124" y="138" class="letter" font-size="16" text-anchor="end">1</text>
+    </g>
+
+    <!-- Tile 4: D -->
+    <g transform="translate(819,180)">
+      <path class="tile-fill ink-thin" d="M6 10 L138 8 L142 142 L4 144 Z" stroke-width="6"/>
+      <text x="72" y="108" class="letter" font-size="92" text-anchor="middle">D</text>
+      <text x="124" y="138" class="letter" font-size="16" text-anchor="end">4</text>
+    </g>
+
+    <!-- Tile 5: C -->
+    <g transform="translate(444,360)">
+      <path class="tile-fill ink-thin" d="M4 8 L140 4 L142 144 L8 144 Z" stroke-width="6"/>
+      <text x="72" y="108" class="letter" font-size="92" text-anchor="middle">C</text>
+      <text x="124" y="138" class="letter" font-size="16" text-anchor="end">4</text>
+    </g>
+
+    <!-- Tile 6: A -->
+    <g transform="translate(594,362)">
+      <path class="tile-fill ink-thin" d="M6 6 L140 10 L138 142 L4 144 Z" stroke-width="6"/>
+      <text x="72" y="108" class="letter" font-size="92" text-anchor="middle">A</text>
+      <text x="124" y="138" class="letter" font-size="16" text-anchor="end">1</text>
+    </g>
+
+    <!-- Tile 7: T -->
+    <g transform="translate(744,360)">
+      <path class="tile-fill ink-thin" d="M4 10 L140 6 L142 142 L6 144 Z" stroke-width="6"/>
+      <text x="72" y="108" class="letter" font-size="92" text-anchor="middle">T</text>
+      <text x="124" y="138" class="letter" font-size="16" text-anchor="end">1</text>
+    </g>
+
+    <!-- Price corner like the box-art sketch -->
+    <g transform="translate(950,150) rotate(-6)">
+      <circle cx="40" cy="40" r="38" fill="#fff8e8" stroke="#1f1408" stroke-width="5"/>
+      <text x="40" y="50" class="letter" font-size="34" text-anchor="middle">$3</text>
+    </g>
+
+    <!-- Tagline -->
+    <text x="665" y="660" class="tagline" font-size="38" text-anchor="middle">
+      &#8220;A cat(egory) game about words&#8221;
+    </text>
+    <text x="665" y="710" class="tagline" font-size="22" text-anchor="middle" opacity="0.75">
+      &#8212; a wise man
+    </text>
+
+  </g>
+</svg>

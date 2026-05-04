@@ -1,0 +1,23 @@
+[Unit]
+Description=WordCat — tile-based word game
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@INSTALL_DIR@
+EnvironmentFile=@INSTALL_DIR@/.env
+ExecStart=@INSTALL_DIR@/backend/.venv/bin/uvicorn app.main:app \
+    --app-dir @INSTALL_DIR@/backend \
+    --host @BIND_HOST@ \
+    --port @PORT@
+Restart=on-failure
+RestartSec=3
+# uvicorn handles SIGTERM cleanly; give it 10s to drain WebSocket clients.
+KillSignal=SIGTERM
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

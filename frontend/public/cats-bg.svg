@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="900" viewBox="0 0 900 900" preserveAspectRatio="xMidYMid slice">
+  <!--
+    Faint repeating cat-doodle pattern (7 distinct poses).
+    All cats are positioned with safe margins to avoid being cut at tile edges.
+      A) Curly-tail dreamer cat (with thought bubble of stacked words)
+      B) Hot-dog / loaf-in-bun cat
+      C) Triangle-face cat sitting in grass
+      D) Chatty long cat with speech bubble
+      E) Loaf cat (very simple oval body, sleepy)
+      F) Stretching cat (front bow)
+      G) Sitting back-view cat (tail curled)
+  -->
+  <defs>
+    <style>
+      .pen { fill: none; stroke: #1f1408; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+      .pen-thin { fill: none; stroke: #1f1408; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.1; }
+      .label { font-family: "Patrick Hand","Caveat","Marker Felt",cursive; fill: #1f1408; font-size: 13px; }
+      g.cat { opacity: 0.18; }
+    </style>
+  </defs>
+
+  <!-- ============= A: Curly-tail dreamer with TEA / HIGH / POP bubbles (top-left) ============= -->
+  <g class="cat" transform="translate(50,150)">
+    <!-- body -->
+    <path class="pen" d="M30 60 Q90 35 150 60 Q160 70 152 84 Q90 96 32 82 Q22 74 30 60 Z"/>
+    <path class="pen" d="M50 84 L48 110 M68 86 L66 110 M118 86 L120 110 M136 84 L138 110"/>
+    <!-- head -->
+    <ellipse class="pen" cx="148" cy="48" rx="22" ry="18"/>
+    <path class="pen" d="M132 36 L128 22 L142 32 Z M158 32 L168 20 L166 38 Z"/>
+    <path class="pen-thin" d="M138 48 q4 -3 8 0 M152 48 q4 -3 8 0"/>
+    <path class="pen-thin" d="M150 54 l2 3 l-2 1 z M148 58 q2 3 4 0 M152 58 q2 3 4 0"/>
+    <path class="pen-thin" d="M124 52 L138 52 M124 56 L138 55 M170 52 L184 52 M170 56 L184 55"/>
+    <!-- curly tail -->
+    <path class="pen" d="M30 64 Q-2 50 4 30 Q8 18 22 22 Q32 26 28 38"/>
+    <text class="label" x="170" y="20" font-style="italic">z z z</text>
+    <!-- thought bubble stack (kept short so it fits) -->
+    <circle class="pen-thin" cx="190" cy="22" r="3"/>
+    <circle class="pen-thin" cx="200" cy="10" r="5"/>
+    <ellipse class="pen-thin" cx="222" cy="-14" rx="34" ry="20"/>
+    <text class="label" x="222" y="-10" text-anchor="middle">TEA</text>
+  </g>
+
+  <!-- ============= B: Hot-dog / loaf cat in bun (top-right) ============= -->
+  <g class="cat" transform="translate(620,140)">
+    <ellipse class="pen" cx="100" cy="60" rx="100" ry="18"/>
+    <path class="pen" d="M20 56 Q100 18 180 56 Q186 64 178 70 Q100 84 22 70 Q14 64 20 56 Z"/>
+    <circle class="pen" cx="172" cy="44" r="14"/>
+    <path class="pen" d="M162 34 L158 24 L168 30 Z M180 30 L186 22 L184 36 Z"/>
+    <path class="pen-thin" d="M165 44 q3 -2 6 0 M175 44 q3 -2 6 0"/>
+    <path class="pen-thin" d="M0 86 L210 86"/>
+    <text class="label" x="14" y="28" font-style="italic">z z z</text>
+  </g>
+
+  <!-- ============= C: Triangle-face cat in grass (mid-left) ============= -->
+  <g class="cat" transform="translate(80,420)">
+    <path class="pen" d="M50 10 L20 80 L80 80 Z"/>
+    <path class="pen" d="M40 22 L36 12 L48 22 Z M52 22 L64 12 L60 22 Z"/>
+    <ellipse class="pen-thin" cx="40" cy="46" rx="3" ry="4"/>
+    <ellipse class="pen-thin" cx="60" cy="46" rx="3" ry="4"/>
+    <path class="pen-thin" d="M48 60 L52 60 L50 64 Z"/>
+    <path class="pen-thin" d="M16 56 L36 56 M16 62 L36 60 M64 56 L84 56 M64 60 L84 62"/>
+    <!-- grass tufts -->
+    <path class="pen-thin" d="M0 94 L8 80 L12 94 L18 78 L22 94 L28 82 L32 94 L40 80 L44 94 L52 80 L56 94 L66 80 L70 94 L80 80 L84 94 L96 80 L100 94"/>
+    <path class="pen" d="M-5 100 L110 100"/>
+  </g>
+
+  <!-- ============= D: Chatty long cat with "meow" bubble (mid-right) ============= -->
+  <g class="cat" transform="translate(580,420)">
+    <path class="pen-thin" d="M20 0 Q-10 -10 -8 -36 Q0 -56 30 -52 Q60 -56 60 -32 Q60 -10 38 -6 L36 4 L26 -4 Z"/>
+    <text class="label" x="26" y="-26" text-anchor="middle">meow</text>
+    <path class="pen" d="M40 60 Q120 30 200 60 Q210 70 200 80 Q120 96 38 80 Q30 70 40 60 Z"/>
+    <path class="pen-thin" d="M70 50 q4 -8 8 0 M100 46 q4 -8 8 0 M130 46 q4 -8 8 0 M160 50 q4 -8 8 0"/>
+    <path class="pen" d="M62 80 L60 108 M82 82 L80 108 M150 82 L152 108 M170 80 L172 108"/>
+    <path class="pen" d="M40 64 Q14 30 24 4 Q28 -4 38 -2"/>
+    <circle class="pen" cx="58" cy="50" r="14"/>
+    <path class="pen" d="M48 38 L44 26 L56 36 Z M68 36 L78 26 L74 40 Z"/>
+    <ellipse class="pen-thin" cx="52" cy="50" rx="2" ry="3"/>
+    <ellipse class="pen-thin" cx="62" cy="50" rx="2" ry="3"/>
+    <path class="pen-thin" d="M55 58 q3 3 6 0"/>
+  </g>
+
+  <!-- ============= E: Loaf cat (mid-center, simplest pose) ============= -->
+  <g class="cat" transform="translate(390,720)">
+    <!-- loaf body: rounded blob, no legs visible -->
+    <path class="pen" d="M10 60 Q60 10 110 30 Q150 40 150 70 Q150 90 80 92 Q20 92 10 70 Z"/>
+    <!-- head -->
+    <circle class="pen" cx="40" cy="40" r="20"/>
+    <path class="pen" d="M28 24 L22 8 L36 22 Z M52 22 L60 8 L56 28 Z"/>
+    <!-- inner ears -->
+    <path class="pen-thin" d="M28 22 L26 16 L32 22 Z M52 22 L54 16 L50 22 Z"/>
+    <!-- closed sleepy eyes -->
+    <path class="pen-thin" d="M30 42 q4 -3 8 0 M44 42 q4 -3 8 0"/>
+    <path class="pen-thin" d="M40 50 L44 50 L42 54 Z"/>
+    <path class="pen-thin" d="M16 48 L30 48 M16 52 L30 51 M52 48 L66 48 M52 52 L66 51"/>
+    <!-- tucked tail line (on the right side) -->
+    <path class="pen-thin" d="M148 70 Q160 60 154 50"/>
+  </g>
+
+  <!-- ============= F: Stretching cat / play bow (bottom-left) ============= -->
+  <g class="cat" transform="translate(120,720)">
+    <!-- back arched up, front low -->
+    <path class="pen" d="M20 70 Q60 20 130 30 Q170 36 180 60 L170 72 L120 64 Q70 64 30 80 Z"/>
+    <!-- front legs splayed -->
+    <path class="pen" d="M30 80 L24 110 M44 78 L40 110"/>
+    <!-- back legs -->
+    <path class="pen" d="M150 70 L156 100 M170 72 L176 100"/>
+    <!-- raised butt + tail -->
+    <path class="pen" d="M180 60 Q200 32 188 8 Q184 0 174 4"/>
+    <!-- head down low -->
+    <circle class="pen" cx="20" cy="80" r="13"/>
+    <path class="pen" d="M12 70 L8 60 L18 68 Z M28 68 L34 58 L30 72 Z"/>
+    <ellipse class="pen-thin" cx="14" cy="80" rx="2" ry="3"/>
+    <ellipse class="pen-thin" cx="24" cy="80" rx="2" ry="3"/>
+    <path class="pen-thin" d="M18 86 L22 86 L20 90 Z"/>
+  </g>
+
+  <!-- ============= G: Sitting back-view cat with curled tail (bottom-right) ============= -->
+  <g class="cat" transform="translate(640,720)">
+    <!-- triangle silhouette (sitting from behind) -->
+    <path class="pen" d="M60 30 L20 110 L100 110 Z"/>
+    <!-- two ear tips poking from top -->
+    <path class="pen" d="M50 40 L42 26 L56 36 Z M70 36 L80 24 L72 40 Z"/>
+    <!-- spine line down center -->
+    <path class="pen-thin" d="M60 50 L60 100" stroke-dasharray="2 4"/>
+    <!-- curled tail wrapping right side -->
+    <path class="pen" d="M100 110 Q140 100 138 70 Q136 50 116 56 Q106 60 110 76"/>
+    <!-- ground -->
+    <path class="pen-thin" d="M5 114 L150 114"/>
+  </g>
+
+</svg>
