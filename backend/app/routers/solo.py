@@ -32,8 +32,8 @@ MODE_DAILY = "daily"
 
 # Solo modes use a tighter, snappier configuration than multiplayer.
 SOLO_POOL_SIZE = 75            # Half-ish of the 147 multiplayer pool
-SOLO_TURN_SECONDS = 60         # 1 min per category card
-SOLO_OVERALL_SECONDS = 300     # 5 min total per game
+SOLO_TURN_SECONDS = 10         # 10s per category card
+SOLO_OVERALL_SECONDS = 60      # 1 min total per game
 
 
 # ---------- helpers ----------
