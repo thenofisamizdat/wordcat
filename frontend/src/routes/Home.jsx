@@ -2,12 +2,16 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.js";
 import LoginForm from "../components/LoginForm.jsx";
+import ShareButton from "../components/ShareButton.jsx";
 
 export default function Home() {
   const { isAuthed, name, isGuest, logout } = useAuth();
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-4">
       <header className="relative">
+        <div className="absolute left-0 top-0">
+          <ShareButton />
+        </div>
         {isAuthed && (
           <div className="absolute right-14 top-0 text-right text-sm">
             <div className="font-semibold">{name} {isGuest && <span className="text-stone-500 font-normal">(guest)</span>}</div>
