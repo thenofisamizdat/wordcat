@@ -19,7 +19,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/practice" element={<SoloPlay mode="practice" />} />
-        <Route path="/daily" element={<SoloPlay mode="daily" />} />
+        <Route path="/daily-timed" element={<SoloPlay mode="daily_timed" />} />
+        <Route path="/daily-untimed" element={<SoloPlay mode="daily_untimed" />} />
         <Route path="/leaderboard" element={<Leaderboard />} />
         <Route path="/lobby" element={<Lobby />} />
         <Route path="/game/:code" element={<GameRoom />} />

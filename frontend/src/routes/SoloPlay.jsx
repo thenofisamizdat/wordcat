@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useAuth } from "../hooks/useAuth.js";
 import TilePool from "../components/TilePool.jsx";
@@ -38,8 +38,21 @@ const FINISH_REASON_TEXT = {
 function reasonText(r) { return REJECTION_REASONS[r] || r || "Something went wrong"; }
 function finishText(r) { return FINISH_REASON_TEXT[r] || r || ""; }
 
+const MODE_TITLE = {
+  daily_timed: "Daily Challenge (Timed)",
+  daily_untimed: "Daily Challenge",
+  practice: "Free Fire",
+};
+
+const PREFIX_MAP = {
+  daily_timed: "/api/solo/daily-timed",
+  daily_untimed: "/api/solo/daily-untimed",
+  practice: "/api/solo/practice",
+};
+
 export default function SoloPlay({ mode }) {
   const { isAuthed, logout } = useAuth();
+  const [searchParams] = useSearchParams();
   const [run, setRun] = useState(null);
   const [picked, setPicked] = useState([]);          // letters in tray order
   const [busy, setBusy] = useState(false);
@@ -54,12 +67,16 @@ export default function SoloPlay({ mode }) {
   const startedRef = useRef(false);
   const gameoverPlayedRef = useRef(false);
 
-  const prefix = mode === "daily" ? "/api/solo/daily" : "/api/solo/practice";
+  const prefix = PREFIX_MAP[mode] ?? "/api/solo/practice";
+  // For practice, read ?timed=0/1 from the URL (defaults to timed).
+  const practiceTimed = searchParams.get("timed") !== "0";
+  const isDaily = mode === "daily_timed" || mode === "daily_untimed";
 
   const start = useCallback(async () => {
     setBusy(true); setError(null);
     try {
-      const r = await api.post(`${prefix}/start`);
+      const body = mode === "practice" ? { timed: practiceTimed } : {};
+      const r = await api.post(`${prefix}/start`, body);
       setRun(r);
       setPicked([]);
     } catch (e) {
@@ -216,7 +233,7 @@ export default function SoloPlay({ mode }) {
 
   const cardDrawn = run?.state?.current_card_id;
   const turnStartedAt = run?.state?.turn_started_at;
-  const turnSeconds = run?.state?.turn_seconds || 180;
+  const turnSeconds = run?.state?.turn_seconds ?? 0;
   const finished = run?.state?.finished;
   const decksRemaining = run?.state?.decks_remaining;
 
@@ -248,7 +265,7 @@ export default function SoloPlay({ mode }) {
     <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-4">
       <header className="flex items-center justify-between gap-3">
         <Link to="/" className="text-stone-600 hover:text-stone-900 text-sm">← Home</Link>
-        <h1 className="text-xl sm:text-2xl font-extrabold">{mode === "daily" ? "Daily Challenge" : "Free Fire"}</h1>
+        <h1 className="text-xl sm:text-2xl font-extrabold">{MODE_TITLE[mode] ?? mode}</h1>
         <div className="text-right relative">
           <div className="text-xs text-stone-500">Score</div>
           <div className="text-2xl font-extrabold tabular-nums">
@@ -279,13 +296,13 @@ export default function SoloPlay({ mode }) {
           <div className="text-stone-700 mt-1">Final score: <span className="font-extrabold text-2xl">{run.state.scores[0]}</span></div>
           <div className="text-stone-500 text-sm mt-1">{finishText(run.state.finish_reason)}</div>
           <div className="mt-3 flex gap-2 justify-center flex-wrap">
-            <button onClick={start} disabled={busy || mode === "daily"}
+            <button onClick={start} disabled={busy || isDaily}
               className="bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white px-4 py-2 rounded font-semibold">
-              {mode === "daily" ? "Come back tomorrow" : "Play again"}
+              {isDaily ? "Come back tomorrow" : "Play again"}
             </button>
             <button
               onClick={async () => {
-                const text = mode === "daily"
+                const text = isDaily
                   ? `WordCat daily ${run.date}: ${run.state.scores[0]} pts`
                   : `WordCat Free Fire: ${run.state.scores[0]} pts`;
                 try { await navigator.clipboard.writeText(text); setFlash({ kind: "good", text: "Copied result!" }); }
@@ -294,7 +311,7 @@ export default function SoloPlay({ mode }) {
               className="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded font-semibold">
               Share result
             </button>
-            {mode === "daily" && (
+            {isDaily && (
               <Link to="/leaderboard" className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded font-semibold">
                 Leaderboard
               </Link>
@@ -313,7 +330,7 @@ export default function SoloPlay({ mode }) {
           ) : (
             <>
               <CategoryCard card={run.card} />
-              <Timer startedAt={turnStartedAt} totalSeconds={turnSeconds} />
+              {turnSeconds > 0 && <Timer startedAt={turnStartedAt} totalSeconds={turnSeconds} />}
             </>
           )}
 

@@ -57,7 +57,7 @@ class CategoryOut(BaseModel):
 # ---------- solo ----------
 
 class SoloStartRequest(BaseModel):
-    pass  # mode in path
+    timed: bool = True  # practice only; daily modes imply timed-ness via URL path
 
 
 class SoloPickRequest(BaseModel):

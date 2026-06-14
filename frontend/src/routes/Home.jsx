@@ -1,11 +1,14 @@
-import React from "react";
-import { Link } from "react-router-dom";
+import React, { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.js";
 import LoginForm from "../components/LoginForm.jsx";
 import ShareButton from "../components/ShareButton.jsx";
 
 export default function Home() {
   const { isAuthed, name, isGuest, logout } = useAuth();
+  const navigate = useNavigate();
+  const [practiceOpen, setPracticeOpen] = useState(false);
+
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-4">
       <header className="relative">
@@ -27,22 +30,54 @@ export default function Home() {
       {!isAuthed ? (
         <LoginForm />
       ) : (
-        <div className="grid sm:grid-cols-3 gap-3 max-w-2xl mx-auto">
-          <Link to="/practice" className="block bg-white rounded-lg p-3 shadow-sm border border-stone-200 hover:shadow-md transition text-center">
-            <div className="text-[0.65rem] uppercase tracking-wider text-emerald-700 font-semibold">Free Fire</div>
-            <div className="text-base font-bold mt-0.5">Solo, unlimited</div>
-            <p className="text-stone-600 text-xs mt-1">Fresh shuffle every time.</p>
-          </Link>
-          <Link to="/daily" className="block bg-white rounded-lg p-3 shadow-sm border border-stone-200 hover:shadow-md transition text-center">
-            <div className="text-[0.65rem] uppercase tracking-wider text-amber-700 font-semibold">Daily Challenge</div>
-            <div className="text-base font-bold mt-0.5">One run per day</div>
-            <p className="text-stone-600 text-xs mt-1">Same shuffle for everyone.</p>
-          </Link>
-          <Link to="/lobby" className="block bg-white rounded-lg p-3 shadow-sm border border-stone-200 hover:shadow-md transition text-center">
-            <div className="text-[0.65rem] uppercase tracking-wider text-sky-700 font-semibold">Multiplayer</div>
-            <div className="text-base font-bold mt-0.5">2–6 players</div>
-            <p className="text-stone-600 text-xs mt-1">Invite friends, take turns.</p>
-          </Link>
+        <div className="space-y-2 max-w-2xl mx-auto">
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Link to="/daily-timed" className="block bg-white rounded-lg p-3 shadow-sm border border-stone-200 hover:shadow-md transition text-center">
+              <div className="text-[0.65rem] uppercase tracking-wider text-amber-700 font-semibold">Daily Challenge · Timed</div>
+              <div className="text-base font-bold mt-0.5">One run per day</div>
+              <p className="text-stone-600 text-xs mt-1">Same shuffle for everyone. 20s per turn, 3 min total.</p>
+            </Link>
+            <Link to="/daily-untimed" className="block bg-white rounded-lg p-3 shadow-sm border border-stone-200 hover:shadow-md transition text-center">
+              <div className="text-[0.65rem] uppercase tracking-wider text-amber-600 font-semibold">Daily Challenge · Untimed</div>
+              <div className="text-base font-bold mt-0.5">One run per day</div>
+              <p className="text-stone-600 text-xs mt-1">Same shuffle for everyone. No time pressure.</p>
+            </Link>
+            <button
+              onClick={() => setPracticeOpen((o) => !o)}
+              className="block w-full bg-white rounded-lg p-3 shadow-sm border border-stone-200 hover:shadow-md transition text-center"
+            >
+              <div className="text-[0.65rem] uppercase tracking-wider text-emerald-700 font-semibold">Free Fire</div>
+              <div className="text-base font-bold mt-0.5">Solo, unlimited</div>
+              <p className="text-stone-600 text-xs mt-1">Fresh shuffle every time.</p>
+            </button>
+            <Link to="/lobby" className="block bg-white rounded-lg p-3 shadow-sm border border-stone-200 hover:shadow-md transition text-center">
+              <div className="text-[0.65rem] uppercase tracking-wider text-sky-700 font-semibold">Multiplayer</div>
+              <div className="text-base font-bold mt-0.5">2–6 players</div>
+              <p className="text-stone-600 text-xs mt-1">Invite friends, take turns.</p>
+            </Link>
+          </div>
+
+          {practiceOpen && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
+              <div className="text-xs text-stone-600 font-medium">Choose Free Fire mode:</div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => navigate("/practice?timed=1")}
+                  className="flex-1 bg-white border border-emerald-300 hover:bg-emerald-100 rounded-lg p-2 text-center text-sm font-semibold transition"
+                >
+                  Timed
+                  <div className="text-xs text-stone-500 font-normal mt-0.5">20s per turn · 3 min total</div>
+                </button>
+                <button
+                  onClick={() => navigate("/practice?timed=0")}
+                  className="flex-1 bg-white border border-emerald-300 hover:bg-emerald-100 rounded-lg p-2 text-center text-sm font-semibold transition"
+                >
+                  No Timer
+                  <div className="text-xs text-stone-500 font-normal mt-0.5">Play at your own pace</div>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
