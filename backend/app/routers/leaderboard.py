@@ -27,7 +27,7 @@ def daily(
     d = date_str or date.today().isoformat()
     rows = (
         db.query(SoloRun)
-        .filter(SoloRun.mode == "daily", SoloRun.date == d)
+        .filter(SoloRun.mode == "daily_timed", SoloRun.date == d)
         .order_by(desc(SoloRun.score), SoloRun.duration_s.asc(), SoloRun.id.asc())
         .limit(100)
         .all()

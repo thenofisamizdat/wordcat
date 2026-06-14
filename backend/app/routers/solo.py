@@ -22,18 +22,20 @@ from ..schemas import (
     SoloPickRequest,
     SoloRunOut,
     SoloSkipRequest,
+    SoloStartRequest,
     SoloSubmitRequest,
 )
 
 router = APIRouter(prefix="/api/solo", tags=["solo"])
 
 MODE_PRACTICE = "practice"
-MODE_DAILY = "daily"
+MODE_DAILY_TIMED = "daily_timed"
+MODE_DAILY_UNTIMED = "daily_untimed"
 
 # Solo modes use a tighter, snappier configuration than multiplayer.
 SOLO_POOL_SIZE = 75            # Half-ish of the 147 multiplayer pool
-SOLO_TURN_SECONDS = 10         # 10s per category card
-SOLO_OVERALL_SECONDS = 60      # 1 min total per game
+SOLO_TURN_SECONDS = 20         # 20s per category card
+SOLO_OVERALL_SECONDS = 180     # 3 min total per game
 
 
 # ---------- helpers ----------
@@ -108,12 +110,12 @@ def _load_run(db: Session, run_id: int, identity: Identity, mode: str) -> SoloRu
     return run
 
 
-def _start_run(db: Session, identity: Identity, mode: str) -> SoloRun:
+def _start_run(db: Session, identity: Identity, mode: str, *, turn_seconds: int, overall_seconds: int) -> SoloRun:
     today = _today_iso()
-    if mode == MODE_DAILY:
+    if mode in (MODE_DAILY_TIMED, MODE_DAILY_UNTIMED):
         existing = (
             _identity_filter(db.query(SoloRun), identity)
-            .filter(SoloRun.mode == MODE_DAILY, SoloRun.date == today)
+            .filter(SoloRun.mode == mode, SoloRun.date == today)
             .first()
         )
         if existing:
@@ -131,9 +133,9 @@ def _start_run(db: Session, identity: Identity, mode: str) -> SoloRun:
     state = engine.new_state(
         seed=seed,
         num_players=1,
-        turn_seconds=SOLO_TURN_SECONDS,
+        turn_seconds=turn_seconds,
         pool_size=SOLO_POOL_SIZE,
-        overall_seconds=SOLO_OVERALL_SECONDS,
+        overall_seconds=overall_seconds,
     )
     run = SoloRun(
         user_id=identity.user.id if identity.user else None,
@@ -206,8 +208,10 @@ def _apply_end(db: Session, run: SoloRun) -> SoloRunOut:
 # ---------- practice endpoints ----------
 
 @router.post("/practice/start", response_model=SoloRunOut)
-def practice_start(db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
-    run = _start_run(db, identity, MODE_PRACTICE)
+def practice_start(req: SoloStartRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
+    ts = SOLO_TURN_SECONDS if req.timed else 0
+    os_ = SOLO_OVERALL_SECONDS if req.timed else 0
+    run = _start_run(db, identity, MODE_PRACTICE, turn_seconds=ts, overall_seconds=os_)
     return _serialize(run)
 
 
@@ -236,34 +240,67 @@ def practice_end(req: SoloSkipRequest, db: Session = Depends(get_db), identity: 
     return _apply_end(db, run)
 
 
-# ---------- daily endpoints (Phase 2; thin wrappers reusing helpers) ----------
+# ---------- daily-timed endpoints ----------
 
-@router.post("/daily/start", response_model=SoloRunOut)
-def daily_start(db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
-    run = _start_run(db, identity, MODE_DAILY)
+@router.post("/daily-timed/start", response_model=SoloRunOut)
+def daily_timed_start(db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
+    run = _start_run(db, identity, MODE_DAILY_TIMED, turn_seconds=SOLO_TURN_SECONDS, overall_seconds=SOLO_OVERALL_SECONDS)
     return _serialize(run)
 
 
-@router.post("/daily/pick", response_model=SoloRunOut)
-def daily_pick(req: SoloPickRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
-    run = _load_run(db, req.run_id, identity, MODE_DAILY)
+@router.post("/daily-timed/pick", response_model=SoloRunOut)
+def daily_timed_pick(req: SoloPickRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
+    run = _load_run(db, req.run_id, identity, MODE_DAILY_TIMED)
     return _apply_pick(db, run, req.tier)
 
 
-@router.post("/daily/submit")
-def daily_submit(req: SoloSubmitRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
-    run = _load_run(db, req.run_id, identity, MODE_DAILY)
+@router.post("/daily-timed/submit")
+def daily_timed_submit(req: SoloSubmitRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
+    run = _load_run(db, req.run_id, identity, MODE_DAILY_TIMED)
     out, res = _apply_submit(db, run, req.word)
     return {"run": out, "result": res}
 
 
-@router.post("/daily/skip", response_model=SoloRunOut)
-def daily_skip(req: SoloSkipRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
-    run = _load_run(db, req.run_id, identity, MODE_DAILY)
+@router.post("/daily-timed/skip", response_model=SoloRunOut)
+def daily_timed_skip(req: SoloSkipRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
+    run = _load_run(db, req.run_id, identity, MODE_DAILY_TIMED)
     return _apply_skip(db, run)
 
 
-@router.post("/daily/end", response_model=SoloRunOut)
-def daily_end(req: SoloSkipRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
-    run = _load_run(db, req.run_id, identity, MODE_DAILY)
+@router.post("/daily-timed/end", response_model=SoloRunOut)
+def daily_timed_end(req: SoloSkipRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
+    run = _load_run(db, req.run_id, identity, MODE_DAILY_TIMED)
+    return _apply_end(db, run)
+
+
+# ---------- daily-untimed endpoints ----------
+
+@router.post("/daily-untimed/start", response_model=SoloRunOut)
+def daily_untimed_start(db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
+    run = _start_run(db, identity, MODE_DAILY_UNTIMED, turn_seconds=0, overall_seconds=0)
+    return _serialize(run)
+
+
+@router.post("/daily-untimed/pick", response_model=SoloRunOut)
+def daily_untimed_pick(req: SoloPickRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
+    run = _load_run(db, req.run_id, identity, MODE_DAILY_UNTIMED)
+    return _apply_pick(db, run, req.tier)
+
+
+@router.post("/daily-untimed/submit")
+def daily_untimed_submit(req: SoloSubmitRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
+    run = _load_run(db, req.run_id, identity, MODE_DAILY_UNTIMED)
+    out, res = _apply_submit(db, run, req.word)
+    return {"run": out, "result": res}
+
+
+@router.post("/daily-untimed/skip", response_model=SoloRunOut)
+def daily_untimed_skip(req: SoloSkipRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
+    run = _load_run(db, req.run_id, identity, MODE_DAILY_UNTIMED)
+    return _apply_skip(db, run)
+
+
+@router.post("/daily-untimed/end", response_model=SoloRunOut)
+def daily_untimed_end(req: SoloSkipRequest, db: Session = Depends(get_db), identity: Identity = Depends(get_identity)):
+    run = _load_run(db, req.run_id, identity, MODE_DAILY_UNTIMED)
     return _apply_end(db, run)
