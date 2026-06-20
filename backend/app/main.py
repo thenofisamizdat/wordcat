@@ -16,7 +16,7 @@ from .game.words import (
     load_letter_values,
     load_tile_distribution,
 )
-from .routers import auth, games, leaderboard, solo, ws
+from .routers import auth, daily_puzzle, games, leaderboard, solo, ws
 
 
 # Locate the built frontend (frontend/dist). In production deploy the
@@ -56,6 +56,7 @@ app.add_middleware(
 # always win over the catch-all).
 app.include_router(auth.router)
 app.include_router(solo.router)
+app.include_router(daily_puzzle.router)
 app.include_router(leaderboard.router)
 app.include_router(games.router)
 app.include_router(ws.router)

@@ -7,7 +7,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import SoloRun, User
+from ..models import DailyResult, SoloRun, User
 from ..schemas import (
     LeaderboardEntry,
     LeaderboardOut,
@@ -37,6 +37,34 @@ def daily(
             rank=i + 1,
             name=r.display_name,
             score=r.score,
+            duration_s=r.duration_s,
+            finished=bool(r.finished),
+        )
+        for i, r in enumerate(rows)
+    ]
+    return LeaderboardOut(date=d, entries=entries)
+
+
+@router.get("/daily-puzzle", response_model=LeaderboardOut)
+def daily_puzzle(
+    date_str: str | None = Query(default=None, alias="date"),
+    db: Session = Depends(get_db),
+):
+    """Leaderboard for the fixed daily puzzle. Ranked by total score, then by
+    fastest finish, then submission order."""
+    d = date_str or date.today().isoformat()
+    rows = (
+        db.query(DailyResult)
+        .filter(DailyResult.date == d, DailyResult.finished == 1)
+        .order_by(desc(DailyResult.total_score), DailyResult.duration_s.asc(), DailyResult.id.asc())
+        .limit(100)
+        .all()
+    )
+    entries = [
+        LeaderboardEntry(
+            rank=i + 1,
+            name=r.display_name,
+            score=r.total_score,
             duration_s=r.duration_s,
             finished=bool(r.finished),
         )

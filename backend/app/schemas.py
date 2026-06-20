@@ -92,6 +92,39 @@ class SoloRunOut(BaseModel):
     categories: list[CategoryOut]
 
 
+# ---------- daily puzzle (fixed sequence) ----------
+
+class StreakOut(BaseModel):
+    current_streak: int
+    best_streak: int
+    last_played_date: Optional[str] = None
+
+
+class DailyPuzzleSubmitRequest(BaseModel):
+    result_id: int
+    word: str
+
+
+class DailyPuzzleSkipRequest(BaseModel):
+    result_id: int
+
+
+class DailyPuzzleOut(BaseModel):
+    result_id: int
+    date: str
+    puzzle_no: int          # day index since launch, for shareable "#N"
+    seed: int
+    finished: bool
+    total_score: int
+    state: dict             # daily_public_view (no spoilers)
+    card: Optional[dict] = None   # current card details if any
+    grid: list[str] = []    # share-grid tiers (only populated once finished)
+    share_text: Optional[str] = None  # ready-to-copy share string (finished only)
+    streak: StreakOut
+    letter_values: dict[str, int]
+    categories: list[CategoryOut]
+
+
 # ---------- leaderboard ----------
 
 class LeaderboardEntry(BaseModel):

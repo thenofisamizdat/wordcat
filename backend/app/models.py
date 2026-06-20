@@ -122,3 +122,49 @@ class RatingHistory(Base):
     display_before: Mapped[int] = mapped_column(Integer)
     display_after: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class DailyResult(Base):
+    """One attempt at the fixed daily puzzle, per identity per date.
+
+    Distinct from `SoloRun` (the open scoring run) so the daily-puzzle
+    leaderboard and share grid have clean, dedicated semantics. `grid_json`
+    stores the share-grid tiers (optimal|good|weak|skip) computed at finish.
+    """
+    __tablename__ = "daily_results"
+    __table_args__ = (
+        # One registered-user attempt per date. Guest uniqueness is enforced in
+        # code (guest_key is nullable so a SQL unique constraint can't cover it
+        # cleanly alongside user_id).
+        UniqueConstraint("user_id", "date", name="uq_daily_user_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    guest_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(64))
+    date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+    seed: Mapped[int] = mapped_column(Integer)
+    state_json: Mapped[str] = mapped_column(Text)             # active engine state
+    grid_json: Mapped[str] = mapped_column(Text, default="[]")  # share-grid tiers at finish
+    total_score: Mapped[int] = mapped_column(Integer, default=0)
+    finished: Mapped[int] = mapped_column(Integer, default=0)  # 0/1 boolean
+    duration_s: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class Streak(Base):
+    """Daily-puzzle streak per identity (registered user OR browser guest).
+
+    `identity_key` is the stable key: "user:<id>" or "guest:<guest_key>".
+    Updated when an identity finishes a daily puzzle.
+    """
+    __tablename__ = "streaks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    identity_key: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    current_streak: Mapped[int] = mapped_column(Integer, default=0)
+    best_streak: Mapped[int] = mapped_column(Integer, default=0)
+    last_played_date: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # YYYY-MM-DD
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

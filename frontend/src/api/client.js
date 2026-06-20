@@ -41,3 +41,27 @@ export const api = {
   get: (p) => request("GET", p),
   post: (p, body) => request("POST", p, body)
 };
+
+// ---------- zero-friction guest bootstrap ----------
+//
+// For the daily puzzle we want play with no signup. A guest token carries a
+// stable `guest_key`; the backend ties streaks + the one-attempt-per-day rule
+// to that key. So we must mint the guest token EXACTLY ONCE and reuse it
+// forever (re-minting would generate a new key and silently reset the streak).
+//
+// ensureGuest() is idempotent: if any token already exists (guest or real
+// account) it's a no-op; otherwise it creates a single persistent guest.
+let _guestInFlight = null;
+export async function ensureGuest(displayName) {
+  if (auth.token) return; // already have an identity (guest or registered)
+  if (_guestInFlight) return _guestInFlight; // de-dupe concurrent callers
+  _guestInFlight = (async () => {
+    try {
+      const r = await api.post("/api/auth/guest", { display_name: displayName || "Player" });
+      auth.set(r.token, r.display_name, true);
+    } finally {
+      _guestInFlight = null;
+    }
+  })();
+  return _guestInFlight;
+}

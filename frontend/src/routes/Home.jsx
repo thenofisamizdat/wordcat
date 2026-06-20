@@ -27,6 +27,15 @@ export default function Home() {
         </div>
       </header>
 
+      <Link
+        to="/today"
+        className="block max-w-2xl mx-auto bg-gradient-to-br from-emerald-600 to-emerald-700 text-white rounded-xl p-5 shadow-md hover:shadow-lg transition text-center"
+      >
+        <div className="text-[0.65rem] uppercase tracking-widest text-emerald-100 font-semibold">Daily Puzzle</div>
+        <div className="text-2xl font-extrabold mt-0.5">Play today&rsquo;s puzzle</div>
+        <p className="text-emerald-100 text-sm mt-1">Five cards, same for everyone. No sign-up — keep your streak going.</p>
+      </Link>
+
       {!isAuthed ? (
         <LoginForm />
       ) : (

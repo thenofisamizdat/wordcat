@@ -146,6 +146,190 @@ def _now() -> float:
     return time.time()
 
 
+# ---------- fixed-sequence (daily puzzle) ----------
+#
+# The daily puzzle is a *fixed* ordered list of (card_id, tier) drawn from one
+# shared pool, identical for every player on a given date. Unlike the open
+# scoring run above, there is no tier-picking and no per-tier decks: the player
+# faces `sequence[sequence_index]` and either submits a word or skips, which
+# advances the index. The game ends when the index passes the final card.
+#
+# State produced here is a JSON-serializable dict, same contract as `new_state`,
+# but with a `sequence` block instead of `decks`. It reuses the same scoring,
+# dictionary and category checks, so the player-facing mechanics are identical.
+
+def new_daily_state(
+    *,
+    seed: int,
+    pool: list[str],
+    sequence: list[dict],
+    turn_seconds: int,
+    overall_seconds: Optional[int] = None,
+) -> dict:
+    """Build a fixed-sequence daily state.
+
+    `pool`     — the exact shared tile pool for the day (already sized/shuffled
+                 deterministically by the daily generator).
+    `sequence` — ordered list of {"card_id": str, "tier": str} the player faces.
+    """
+    if not sequence:
+        raise ValueError("sequence must be non-empty")
+    return {
+        "mode": "daily_fixed",
+        "seed": seed,
+        "turn_seconds": int(turn_seconds),
+        "overall_seconds": int(overall_seconds) if overall_seconds else 0,
+        "started_at": _now(),
+        "pool": list(pool),
+        "discarded_tiles": [],
+        "sequence": [{"card_id": s["card_id"], "tier": s["tier"]} for s in sequence],
+        "sequence_index": 0,
+        # Per-card outcome, filled as the player progresses. Each entry:
+        #   {"card_id","tier","word"|None,"points","result": optimal|good|weak|skip}
+        "results": [],
+        "scores": [0],            # single player; keep list shape for parity
+        "turn_started_at": _now(),
+        "history": [],
+        "finished": False,
+        "finish_reason": None,
+        "num_players": 1,
+    }
+
+
+def _daily_current(state: dict) -> Optional[dict]:
+    idx = state["sequence_index"]
+    seq = state["sequence"]
+    if 0 <= idx < len(seq):
+        return seq[idx]
+    return None
+
+
+def _daily_finish_if_done(state: dict) -> None:
+    if state["finished"]:
+        return
+    if _overall_expired(state):
+        state["finished"] = True
+        state["finish_reason"] = "time_up"
+        state["turn_started_at"] = None
+        return
+    if state["sequence_index"] >= len(state["sequence"]):
+        state["finished"] = True
+        state["finish_reason"] = "complete"
+        state["turn_started_at"] = None
+
+
+def _daily_advance(state: dict) -> None:
+    state["sequence_index"] += 1
+    state["turn_started_at"] = _now()
+    _daily_finish_if_done(state)
+
+
+def daily_public_view(state: dict) -> dict:
+    """Frontend snapshot for the daily puzzle. Deliberately omits any
+    optimal-word / threshold data so the answer is never leaked."""
+    cur = _daily_current(state)
+    return {
+        "mode": "daily_fixed",
+        "pool_counts": pool_to_counts(state["pool"]),
+        "pool_total": len(state["pool"]),
+        "discarded_counts": pool_to_counts(state["discarded_tiles"]),
+        "discarded_total": len(state["discarded_tiles"]),
+        "scores": state["scores"],
+        "sequence_index": state["sequence_index"],
+        "sequence_length": len(state["sequence"]),
+        "current_card_id": cur["card_id"] if cur else None,
+        "current_difficulty": cur["tier"] if cur else None,
+        "results": state["results"],
+        "turn_started_at": state["turn_started_at"],
+        "turn_seconds": state["turn_seconds"],
+        "overall_seconds": state.get("overall_seconds", 0),
+        "started_at": state.get("started_at"),
+        "finished": state["finished"],
+        "finish_reason": state["finish_reason"],
+        "num_players": 1,
+        "difficulty_multipliers": DIFFICULTY_MULTIPLIER,
+    }
+
+
+def daily_submit(state: dict, word: str) -> dict:
+    """Submit a word for the current daily card. Validates letters, dictionary
+    and category, scores it, removes the tiles, records the per-card result and
+    advances the sequence. Returns {ok, word, points} on success."""
+    if state["finished"]:
+        return {"ok": False, "reason": "game_finished"}
+    if _overall_expired(state):
+        _daily_finish_if_done(state)
+        return {"ok": False, "reason": "time_up"}
+    cur = _daily_current(state)
+    if cur is None:
+        return {"ok": False, "reason": "no_card"}
+    norm = normalize_word(word)
+    if not norm:
+        return {"ok": False, "reason": "empty_word"}
+    pool_counts = pool_to_counts(state["pool"])
+    if not letters_available(norm, pool_counts):
+        return {"ok": False, "reason": "letters_unavailable", "word": norm}
+    if not in_dictionary(norm):
+        return {"ok": False, "reason": "not_in_dict", "word": norm}
+    if not in_category(norm, cur["card_id"]):
+        return {"ok": False, "reason": "not_in_category", "word": norm}
+
+    pts = score_word(norm, cur["tier"])
+    state["pool"] = remove_letters(norm, state["pool"])
+    state["discarded_tiles"].extend(list(norm))
+    state["scores"][0] += pts
+    state["results"].append({
+        "card_id": cur["card_id"],
+        "tier": cur["tier"],
+        "word": norm,
+        "points": pts,
+        "result": None,  # optimality tier assigned at finish by the caller
+    })
+    state["history"].append({
+        "type": "word_accepted", "seat": 0, "word": norm,
+        "tier": cur["tier"], "card_id": cur["card_id"], "points": pts, "ts": _now(),
+    })
+    _daily_advance(state)
+    return {"ok": True, "word": norm, "points": pts}
+
+
+def daily_skip(state: dict, *, reason: str = "voluntary") -> dict:
+    """Skip the current daily card (records a grey/skip result) and advance."""
+    if state["finished"]:
+        return {"ok": False, "reason": "game_finished"}
+    if _overall_expired(state):
+        _daily_finish_if_done(state)
+        return {"ok": False, "reason": "time_up"}
+    cur = _daily_current(state)
+    if cur is None:
+        return {"ok": False, "reason": "no_card"}
+    state["results"].append({
+        "card_id": cur["card_id"],
+        "tier": cur["tier"],
+        "word": None,
+        "points": 0,
+        "result": "skip",
+    })
+    state["history"].append({
+        "type": "skip", "seat": 0, "reason": reason,
+        "card_id": cur["card_id"], "ts": _now(),
+    })
+    _daily_advance(state)
+    return {"ok": True, "reason": reason}
+
+
+def daily_force_expire(state: dict) -> bool:
+    """Idempotent: end the daily game if the overall clock has elapsed.
+    Returns True if it fired. Per-turn timeout is intentionally NOT enforced —
+    the daily puzzle uses a relaxed/overall clock, not turn pressure."""
+    if state["finished"]:
+        return False
+    if _overall_expired(state):
+        _daily_finish_if_done(state)
+        return True
+    return False
+
+
 def _advance_seat(state: dict) -> None:
     state["current_seat"] = (state["current_seat"] + 1) % state["num_players"]
     # Re-arm the per-turn timer for the new seat. Picking + submitting both

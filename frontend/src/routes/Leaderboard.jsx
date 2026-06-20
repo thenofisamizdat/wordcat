@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
 
-export default function Leaderboard() {
+export default function Leaderboard({ endpoint = "/api/leaderboard/daily", title = "Daily Leaderboard" }) {
   const today = new Date().toISOString().slice(0, 10);
   const [date, setDate] = useState(today);
   const [data, setData] = useState(null);
@@ -10,14 +10,14 @@ export default function Leaderboard() {
 
   useEffect(() => {
     setBusy(true);
-    api.get(`/api/leaderboard/daily?date=${date}`).then(setData).finally(() => setBusy(false));
-  }, [date]);
+    api.get(`${endpoint}?date=${date}`).then(setData).finally(() => setBusy(false));
+  }, [date, endpoint]);
 
   return (
     <div className="max-w-2xl mx-auto p-6 space-y-4">
       <div className="flex items-center justify-between">
         <Link to="/" className="text-stone-600 hover:text-stone-900 text-sm">← Home</Link>
-        <h1 className="text-2xl font-extrabold">Daily Leaderboard</h1>
+        <h1 className="text-2xl font-extrabold">{title}</h1>
         <input type="date" value={date} onChange={e=>setDate(e.target.value)}
           className="border rounded px-2 py-1 text-sm" />
       </div>
